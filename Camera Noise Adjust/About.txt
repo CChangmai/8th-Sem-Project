@@ -1,0 +1,1 @@
+This folder is used for preprocessing filters that can be used when the environment lighting is good/bad. Appropriatte Adjustments can be made to that image
