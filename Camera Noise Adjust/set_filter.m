@@ -1,6 +1,7 @@
 function filtering_intensity = set_filter( image )
 %This Function Basically Sorts Out How Aggressive A Filter To Use When 
-%
+%A User Moves A Camera
+%Accelerometer Can Also Be Used instead Of this
 
 [row col]=size(image);
 %Use Laplacian To Filter Out The Image
