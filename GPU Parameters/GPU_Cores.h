@@ -6,7 +6,7 @@ namespace gpuc
 __global NumThreads(int*) 
 __global__ void TrackMemPointer()
 __global__ void DetectGPU(int*)
---global-- void CheckFree()
+__global__ void CheckFree()
 }
 /*I want to Locate The Threads And Make Functions That
 May Be Able To Detect Current Memory Allocations
