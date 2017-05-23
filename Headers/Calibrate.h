@@ -17,6 +17,12 @@
 cv::Mat filter(100,100,CV_8UC1);
 const int threshold=(int)(0.6*10000);//60% of space 
 
+/*
+I'm Making two overloads to this function
+One That Makes A Normal Filter 
+And One That Makes A Copy for the GPU
+*/
+
 void make_Filter()
 {
     int i,j;
@@ -41,6 +47,34 @@ void make_Filter()
 
 
 }
+
+void make_Filter(cv::Mat &pic)
+{
+    int i,j;
+
+
+      for(i=0;i<100;i++)
+      {
+        /*Since 0,0 lies on the top left corner
+          We want 0,0 from the bottom left corner
+          So we have to subtract the coordinate from 100 to get the actual distance
+          
+          The Other Arc Is Found When we move or solve the equation of the circle
+          to the negative x-axis
+          So we substitute that value for x + offset, which is 100
+        */
+        
+        j=100-(int)sqrt(10000-(i*i));
+        
+        pic.at<uchar>(i,j)     =     1;    
+        pic.at<uchar>(100-i,j) =     1;
+  
+      }
+
+
+}
+
+
 
 int Calibrate_Finger(cv::Mat &img,cv::Mat &prev,
                              int height,int width,int bheight,int bwidth)
@@ -71,9 +105,12 @@ int Calibrate_Finger(cv::Mat &img,cv::Mat &prev,
       The Old Image is lost
       
       prev variable passed as Parameter
+      WHICH WILL BE UPDATED WITH NEW VALUE
+      AFTER FILTER MATCHING
     */
     
     cv::bitwise_and(temp_img1,prev,temp_img2);
+    temp_img2.copyTo(prev);
     pixel_density=cv::countNonZero(temp_img2);
     
     /*Now Apply Filter Matching*/

@@ -26,7 +26,8 @@ int pdensity[N],*gthresh;
 */
 unsigned char *gpuptr,*cpuptr,*fcount,*gpucount;
 
-__const__ curve_data[200]; //To allocate fast memory
+
+/*unsigned char* curve_data;*/ //To See Pixel Location
 
 typedef struct block
 {
@@ -35,41 +36,32 @@ typedef struct block
     unsigned char data[bsize][bsize]; //40x40 image
 }Blocks;
 
-typedef struct Point
-{
-    int x;
-    int y;
 
-}Pt;
-
-/*Assign Blocks in CUDA Memory for fast execution*/
+/*
+    Assign Blocks in CUDA Memory for fast execution
+    Blocks Is User-Defined Datatype defined above
+*/
 
 Blocks *small_image;
-Pt *loc;
-
-void assign_threshold(int t[])
-{
-        cudaMalloc(pdensity,N*sizeof(int));
-        cudaMemset(pdensity,0,N*sizeof(int));
-        cudaMalloc(loc,sizeof(Pt));
-        cudaMalloc(gpucount,sizeof(int));
-        cudaMalloc(small_image,N * sizeof(Blocks));
-        cudaMemcpy(gthresh,t,6 * sizeof(int),cudaMemcpyHostToDevice);
-}      
+/*
+Use This If U need To Find The Cursor Location
+int *loc_x,*loc_y; 
+*/
+ 
 
 
 __global__ void cleanup()
 {
-    cudaFreeHost(cpuptr);
+    //cudaFreeHost(cpuptr); Not Doing This due to some problems in main function
     cudaFree(small_image);
-    cudaFree(gthresh);
+    
 }
 
 
-char* MapImageToCPU()
+unsigned char* MapImageToCPU()
 {
     //Add Finger Count Here As Well
-    char* ptr=NULL;
+    unsigned char* ptr=NULL;
           fcount=NULL;
     
     cudaSetDeviceFlags(cudaDeviceMapHost); 
@@ -94,11 +86,24 @@ void* MapVariable(int size)
     
     //Add Finger Count Here As Well
     void* ptr=NULL;
-          fcount=NULL;
+      
     
     cudaSetDeviceFlags(cudaDeviceMapHost); 
     /*Assign Both CPU image and GPU Count*/
-    cudaHostAlloc(&ptr,height*width,cudaHostAllocMapped);
+    cudaHostAlloc(&ptr,size,cudaHostAllocMapped);
+    
+    return ptr;
+}
+
+unsigned char* MapFilter()
+{
+    
+    //Add Finger Count Here As Well
+    unsigned char* ptr=NULL;
+    cudaSetDeviceFlags(cudaDeviceMapHost); 
+    /*Assign Both CPU image and GPU Count*/
+    cudaHostAlloc(&ptr,bsize*bsize,cudaHostAllocMapped);
+    cudaHostGetDevicePointer(&filter,ptr);
     return ptr;
 }
 
@@ -110,6 +115,28 @@ void* GetGPUAddress(int* &cpuid)
     return ptr;
 }
 
+/*
+GET A POINTER TO CPU_MEMORY TO ASSIGN THRESHOLD RATHER THAN COPYING ANYTHING TO GPU
+*/
+int* assign_threshold()
+{
+        
+        cudaMalloc(pdensity,N*sizeof(int));
+        cudaMemset(pdensity,0,N*sizeof(int));
+        //cudaMalloc(loc,sizeof(Pt));
+        cudaMalloc(gpucount,sizeof(int));
+        cudaMalloc(small_image,N * sizeof(Blocks));
+     
+     
+     //-----------NOW MAP DEVICE MEMORY---------------------------
+     
+     int* ptr=NULL;
+     cudaSetDeviceFlags(cudaDeviceMapHost); 
+     /*Assign Both CPU image and GPU Count*/
+     cudaHostAlloc(&ptr,5*sizeof(int),cudaHostAllocMapped);
+     cudaHostGetDevicePointer(&gthresh,ptr);
+     return *ptr;
+}     
  
  /* I'm Calling Split Blocks According To Symmetric Blocks And Threads  */
  
@@ -133,7 +160,7 @@ __global__ void splitblocks()
      So, I separated The Image into a grid for easy access
   */   
   
-    if((bID<=N) && (
+    if((bID<=N) && ((x*y)<=isize)
      {
             small_image[bID]->data[x][y]=gpuptr[pixel_loc];
      } 
@@ -149,7 +176,7 @@ __global__ void write_density()
         {
             for(j=0;j<N;j++)
             {
-               if(small_image[x]->data[i][j]==255)
+               if(small_image[x]->data[i][j]==1)
                {
                  pdensity[x]++; //This addition is threadsafe
                }
@@ -160,13 +187,11 @@ __global__ void write_density()
 
     }
 
-int fingers(unsigned char* image)
+int finger_location()
 {
 /*Assuming I've Already Have Assigned CPU Image Mapped Pointer */
 
-        int max=0;
-        int b=0;
-        int res=0;
+        int BLOCK=0;
         /*Searching Function*/
         dim3 sblocks (1,N);
         dim3 sthreads (bsize,bsize); // NxN array
@@ -184,23 +209,28 @@ int fingers(unsigned char* image)
             
         cudaThreadSynchronize();
         
-        /* Simple Max Function after Doing Everything */     
+        /* Simple CALLING Function after Doing Everything */     
         for(i=0;i<N;i++)
         {
-           if(max<pdensity[i])
+           if(pdensity[i]<gthresh[0])
            {
-                max=pdensity[i];
-                b=i;
+              BLOCK=i;
            }    
         
          }      
         
-
-return res;
+cleanup();
+return BLOCK;
 
 }
 
-/*Block Thread Process */
+void CleanImage()
+{
+cudaFreeHost(cpuptr);
+}
+/*Block Thread Process 
+
+Unfinished Cursor Finding Process
 
 __global__ checkarc(bool direction)
 {
@@ -212,7 +242,7 @@ __global__ checkarc(bool direction)
        {
           if (small_image[bID].data[circle_y(tx)][tx] == 1)
           {
-                    loc.x=//I don't know
+                    loc.x=                          //I don't know
           
           }       
        
@@ -228,11 +258,12 @@ __global__ checkarc(bool direction)
        }
 
 
-}
-
-
-__device__ int circle_y(int x)
-{
-   return (int)(sqrt(float((N*N)-(x*x))));
 
 }
+*/
+
+
+/*Dummy Main Function
+  Just To Be On The Safe Side
+ */
+

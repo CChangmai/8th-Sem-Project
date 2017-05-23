@@ -16,9 +16,7 @@
 
 cv::Mat Puzzle;
 
-cv::Mat CPuzzle;
-
-void Assign_Puzzle(char* s,int &bwidth,int &bheight,int &swidth,int &sheight)
+void Assign_Puzzle(char* s,int &bwidth,int &bheight,int &swidth,int &sheight,cv::Scalar &Color)
 {
     cv::Mat image;
     image = cv::imread(s, CV_LOAD_IMAGE_COLOR);   // Read the file
@@ -40,7 +38,7 @@ void Assign_Puzzle(char* s,int &bwidth,int &bheight,int &swidth,int &sheight)
                     
                     for(j=0;j<swidth;j+=bwidth)
                     {
-                            cv::rectangle(pic,
+                            cv::rectangle(image,
                                           cv::Point(j,i),
                                           cv::Point(j+bwidth,j+bheight),
                                           Color,
@@ -103,6 +101,11 @@ void Swap_Pieces(int &prev_index,int &new_index,int block_size)
 
 }
 
+void Blend_Puzzle(cv::Mat &pic,float transparency=0.75)
+{
+    float opacity=1-transparency;
+    addWeighted(Puzzle,opacity,pic,transparency,0.0,pic);
+}
 
 
 
