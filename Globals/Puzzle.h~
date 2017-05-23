@@ -1,0 +1,74 @@
+#ifndef HAS_IOSTREAM
+    #include<iostream>
+    #include<vector>
+    #include<algorithm>  // Mainly For Swapping Puzzle Pieces
+    #define HAS_IOSTREAM
+#endif
+    
+#ifndef HAS_OPENCV
+    #include<opencv2/core/core.hpp>
+    #include<opencv2/highgui/highgui.hpp>
+    #include<opencv2/imgproc/imgproc.hpp>
+    
+    #define HAS_OPENCV
+    
+#endif    
+
+
+std::vector<cv::Mat> Puzzle;
+
+cv::Mat CPuzzle;
+
+void Assign_Puzzle(char* s,int &bwidth,int &bheight,int &swidth,int &sheight)
+{
+    cv::Mat image;
+    image = cv::imread(s, cv::CV_LOAD_IMAGE_COLOR);   // Read the file
+    
+    
+    if(! image.data )                        // Check for invalid input
+    {
+        cout <<  "Could not open or find the image" <<endl ;
+    }
+    else
+    {
+    
+    
+      cv::resize(image,image,cv::Size(swidth,sheight));
+      
+      cv::Rect roi =cv::Rect(x,y,bwidth,bheight);
+      
+      
+      for(int y=0;y<sheight;y+=bheight)
+        {
+                for(int x=0;x<sheight;x+=bwidth)
+                {
+                    roi=cv::Rect(x,y,bwidth,bheight);
+                    
+                    Puzzle.push_back(image(roi));      
+                
+                
+                }
+                
+        
+        }
+    
+    std::cout<<"\n Puzzle Has Been Accepted \n ";
+    
+    }
+    
+   
+    
+}
+
+void Swap_Pieces(int &prev_index,int &new_index)
+{
+        
+        
+
+
+}
+
+
+
+
+

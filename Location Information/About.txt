@@ -1,2 +1,0 @@
-This part can be used to access Google Maps Python API's
-It is easier to extract location using Python's Powerful String Search Tools

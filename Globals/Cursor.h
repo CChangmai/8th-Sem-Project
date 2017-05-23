@@ -1,9 +1,3 @@
-#ifndef HAS_IOSTREAM
-    #include<iostream>
-    #define HAS_IOSTREAM
-#endif
-
-
 #ifdef __cplusplus
 extern "C"
 {
@@ -56,14 +50,21 @@ const float threshold = (1/60) ;
      }    
 
 
+    char* commands[5];
 
+    void set_commands()
+    {
+        commands[1]="";
+        commands[2]="";
+        commands[3]="";
+        commands[4]="";
+        commands[5]="";
+    }
 
-
-
-
-
-
-
+void implement_commands(char* line)
+{
+    system(command);
+}
 
 #ifdef __cplusplus
 }
