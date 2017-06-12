@@ -10,20 +10,26 @@
     #define HAS_IOSTREAM
 #endif
 
+#ifndef FPS
+    #define FPS 30
+#endif
+
 namespace IPCAM
 {
     cv::VideoCapture IP_Feed;
-    bool status;
+    bool status=false;
+    std::string url;
     
-    cv::Mat IP_Image;
-        
+    // cv::Mat IP_Image;
+    
+       
     void startRx()
     {   
        
-       status=0;
-       std::string url;
+       status=false;
+      
        
-       while(status==0)
+       while(status==false)
        {
        std::cout<<"Enter URL Of The IP Camera : " ;
        std::cin>>url;
@@ -38,26 +44,36 @@ namespace IPCAM
                  IP_Feed.set(CV_CAP_PROP_FPS,120);
                  double width=IP_Feed.get(CV_CAP_PROP_FRAME_WIDTH);            
                  double height=IP_Feed.get(CV_CAP_PROP_FRAME_HEIGHT);
-                 std::cout<<"\n\tDisplaying Image in "<<width<<"x"<<height<<"pixels\n";
+                 std::cout<<"\n\tDisplaying Image in "<<width<<"x"<<height<<" pixels\n";
                 
-                 status=1;
+                 status=true;
                 
              }
                  else
                  {
                     std::cout<<"Could Not Find IP Camera Feed For The Given URL\nPlease Try Again\n"; 
-                    status=0;   
+                    status=false;   
                  }
        }    
     }
-    void getRx()
+    void getRx(cv::Mat &img)
     {
-        if (status==1)
+        if (status==true)
         {
-         IP_Feed.read(IP_Image);
+         IP_Feed.read(img);
         }
     
     
+    }
+    
+    void RefreshRx(float time)
+    {
+    
+       /* WE SET THE PROPERTY OF THE VIDEOCAPTURE TO GET THE NEXT FEED */
+       int current_frame = (int)IP_Feed.get(CV_CAP_PROP_POS_FRAMES);
+       int frameskip = (int)(time*FPS);
+       IP_Feed.set(CV_CAP_PROP_POS_FRAMES,current_frame+frameskip-1);
+      
     }
     
     void stopRx()

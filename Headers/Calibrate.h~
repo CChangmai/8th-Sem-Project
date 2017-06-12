@@ -22,17 +22,7 @@
 
 
 cv::Mat filter(BSIZE,BSIZE,CV_8UC1);
-const int threshold=(int)(0.25*(BSIZE*BSIZE));//60% of space 
-
-
-bool inRange(int value,int center,int deviation)
-{
-        
-return ( ( value > ( center-deviation ) ) && (value < (center + deviation) ) ) ;
-
-
-}
-
+const int threshold=(int)(0.1*(BSIZE*BSIZE));//60% of space 
 
 /*
 I'm Making two overloads to this function
@@ -40,34 +30,25 @@ One That Makes A Normal Filter
 And One That Makes A Copy for the GPU
 */
 
-
 void make_Filter()
 {
     int i,j;
     filter.setTo(0);
 
-      for(i=0;i<(BSIZE/2);i++)
+      for(i=0;i<BSIZE;i++)
       {
         /*Since 0,0 lies on the top left corner
           We want 0,0 from the bottom left corner
           So we have to subtract the coordinate from 100 to get the actual distance
           
           The Other Arc Is Found When we move to a negative x-axis
-          So we substitute that value by
-          x + offset + (0.5 * finger width) 
-          which is assumed to be 15 each side
-          The OFFSET is half the block size
+          So we substitute that value for x + offset, which is 100
         */
         
-        j=(int)sqrt( ( (BSIZE*BSIZE)/4) - (i*i) );
+        j=(int)sqrt((BSIZE*BSIZE)-(i*i));
         
-        //POSITIVE HALF + OFFSET
-        
-        filter.at<uchar>( (BSIZE - j ) , ( BSIZE / 2 ) - i + 15 )   =  255;    
-        
-        //NEGATIVE HALF + OFFSET
-        
-        filter.at<uchar>( (BSIZE - j ) , ( BSIZE / 2 ) + i - 15 ) =     255;
+        filter.at<uchar>(BSIZE-i,BSIZE-j)     =     255;    
+        filter.at<uchar>(BSIZE-i,j) =     255;
   
       }
       
@@ -191,7 +172,7 @@ int Calibrate_Finger(cv::Mat &img,cv::Mat &prev,
     */
     
     
-    if( inRange( pixel_density, threshold , 100 ) && inRange( cross_match , 60 , 10 ) )
+    if((pixel_density>0) && (pixel_density<threshold) && (cross_match>100))
     {
     
        std::cout<<"\n Calibration Successful : "<<pixel_density<<"\n";

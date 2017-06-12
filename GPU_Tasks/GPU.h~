@@ -17,6 +17,8 @@ void CleanImage();
 
 unsigned char* MapFilter();
 
+__device__ int checkarc(unsigned char[][BSIZE],unsigned char*);
+
 /*May Change it Later.
  Assuming 6 Variables
  Copy it only once in memory for processing
@@ -25,8 +27,12 @@ unsigned char* MapFilter();
 #define height 480
 #define width 640
 #define isize 307200
-#define N 192
-#define bsize 80
+#define N 48
+
+#ifndef HAS_SIZE
+    #define BSIZE 80
+    #define HAS_SIZE
+#endif    
 
 /*Store Pixel Density in CUDA Memory And GPU Memory for Analysis */
 int *gthresh,*pdensity,*maxval,*gputhresh;
@@ -37,12 +43,21 @@ int *gthresh,*pdensity,*maxval,*gputhresh;
     Swan Dive Into Zero-Copy MEMORY World 
     ALSO CALLED HOST MAPPED MEMORY
     Keeping My Fingers Crossed
-    gpuptr stores the gpu location of mapped memory
+    VARIABLE NAMES STARTING WITH g OR gpu stores the gpu location of mapped memory
     cpuptr stores the cpu location of mapped memory
     
     I THINK ALL OF THESE VARIABLES ARE HOST CODE
 */
-unsigned char *gpuptr,*cpuptr,*fcount,*gpucount,*gpufilter;
+unsigned char *gpuptr,*gpucount,*gpufilter; //FOR ACCESS BY BOTH CPU AND GPU
+
+unsigned char* createImageBuffer(unsigned int bytes)
+{
+    unsigned char *ptr = NULL;
+    cudaSetDeviceFlags(cudaDeviceMapHost);
+    cudaHostAlloc(&ptr, bytes, cudaHostAllocMapped);
+    std::cout<<"Adddress Pointed To : "<<(void*)ptr<<std::endl;
+    return ptr;
+}
 
 
 
@@ -51,7 +66,7 @@ typedef struct
 {
     int h;
     int w;
-    unsigned char data[bsize][bsize]; //40x40 image
+    unsigned char data[BSIZE][BSIZE]; //40x40 image
 }Blocks;
 
 
@@ -61,7 +76,7 @@ typedef struct
     UNSURE WHETHER ITS HOST MEMORY OR DEVICE MEMORY
 */
 
-Blocks *small_image;
+Blocks *small_images;
 /*
 Use This If U need To Find The Cursor Location
 int *loc_x,*loc_y; 
@@ -72,34 +87,31 @@ int *loc_x,*loc_y;
 void cleanup()
 {
     //cudaFreeHost(cpuptr); Not Doing This due to some problems in main function
-    cudaFree(small_image);
-    
+    cudaFree(small_images);    
 }
 
 
 __host__ unsigned char* MapImageToCPU()
 {
     //Add Finger Count Here As Well
-    unsigned char* ptr=NULL;
-          fcount=NULL;
-    
+    unsigned char* ptr;
+                   
+                      
     cudaSetDeviceFlags(cudaDeviceMapHost); 
     
     /*Assign Both CPU image and GPU Count*/
     
-    cudaHostAlloc(&ptr,height*width,cudaHostAllocMapped);
-    cudaHostAlloc(&fcount,1,cudaHostAllocMapped);
-    
+    cudaHostAlloc((void**)&ptr,height*width,cudaHostAllocMapped);
+        
     /*Assign The GPU Pointer To The Location Made by HostAlloc
                         In CPU Memory */
+      
     
-    cudaHostGetDevicePointer(&gpuptr,ptr,0);
-    cudaHostGetDevicePointer(&gpucount,fcount,0);
+    cudaHostGetDevicePointer((void**)&gpuptr,  (void*)ptr,   0);
+   
     
-    cpuptr=ptr;
-    
-    std::cout<<"\nThe Pointer Allocated in CPU Memory is : "<<&ptr;
-    std::cout<<"\nThe Pointer Allocated in GPU Memory is : "<<&gpuptr;
+    std::cout<<"\nThe Pointer Allocated in CPU Memory is : "<<(void*)ptr;
+    std::cout<<"\nThe Pointer Allocated in GPU Memory is : "<<(void*)gpuptr;
     return ptr;
 } 
 
@@ -121,31 +133,33 @@ __host__ unsigned char* MapFilter()
 {
     
     //Add Finger Count Here As Well
-    unsigned char* ptr=NULL;
+    unsigned char* ptr;
     cudaSetDeviceFlags(cudaDeviceMapHost); 
     /*Assign Both CPU image and GPU Count*/
-    cudaHostAlloc(&ptr,bsize*bsize,cudaHostAllocMapped);
-    cudaHostGetDevicePointer(&gpufilter,ptr,0);
+    cudaHostAlloc((void**)&ptr,BSIZE*BSIZE,cudaHostAllocMapped);
+    cudaHostGetDevicePointer((void**)&gpufilter,(void*)ptr,0);
+    
+    std::cout<<"GPU LOCATION OF FILTER : "<<(void*)gpufilter<<"endl";
     return ptr;
 }
 
 __host__ void* GetGPUAddress(int* &cpuid)
 {
-    void* ptr=NULL;
+    void* ptr;
     cudaSetDeviceFlags(cudaDeviceMapHost);
-    cudaHostGetDevicePointer(&ptr,cpuid,0);
+    cudaHostGetDevicePointer((void**)&ptr,(void*)cpuid,0);
     return ptr;
 }
 
 /*
 GET A POINTER TO CPU_MEMORY TO ASSIGN THRESHOLD RATHER THAN COPYING ANYTHING TO GPU
 ALSO USE A GLOBAL FUNCTION THAT CAN ASSIGN MEMORY IN DEVICE
-*/
+
 __global__ void assign_GPU_variables()
 {
        
 }
-
+*/
 __host__ int* assign_threshold()
 {
         
@@ -159,14 +173,15 @@ __host__ int* assign_threshold()
         
         //cudaMalloc(loc,sizeof(Pt));
         //cudaMalloc(&gpucount,sizeof(int));
-        cudaMalloc(&small_image,N * sizeof(Blocks));
+        cudaMalloc(&small_images,N * sizeof(Blocks));
      //-----------NOW MAP DEVICE MEMORY---------------------------
      
-     int* ptr=NULL;
+     int* ptr;
      cudaSetDeviceFlags(cudaDeviceMapHost); 
      /*Assign Both CPU image and GPU Count*/
      cudaHostAlloc(&ptr,5*sizeof(int),cudaHostAllocMapped);
-     cudaHostGetDevicePointer(&gthresh,ptr,0);
+     cudaHostGetDevicePointer((void**)&gthresh,(void*)ptr,0);
+     std::cout<<"\nThe Pointer Allocated in CPU Memory For Fingers is : "<<(void*)ptr<<"\n";
      return ptr;
 }     
  
@@ -185,14 +200,29 @@ __global__ void splitblocks(unsigned char* ptr,Blocks* &simage)
   int x=threadIdx.x;
   int y=threadIdx.y;
   
-  int pixel_loc = bID + (width * y)+ x; // We Don't need x here because block ID gives X-coordinate value
+  /* 
+    ASSUMING LINEAR ASSIGNMENT USING ROW MAJOR 
+    ONE ROW CONTAINS INDEX 1 TO 640 SO ONE THREAD
+    MOVES "IN MULTIPLES OF 80" UPTO 640
+    
+    THEN AGAIN HE HAS TO MOVE LOCALLY IN Y OR
+    VERTICAL DIRECTION
+    SO FURTHER MOVEMENT OF (640 x Number of Local Columns)   
+    
+    THEN FINALLY MOVE IN X-DIRECTION TO GET (X,Y)
+    CO-ORDINATE 
+    
+  */
   
-  /* I'm not doing this in a single loop because all threads might access the same 
+  int pixel_loc = (bID * BSIZE) + (y * width) + x ; 
+  
+  /* 
+     I'm not doing this in a single loop because all threads might access the same 
      pixel density variable, which might lead to Use of Extra atomic Functions
      So, I separated The Image into a grid for easy access
   */   
   
-    if((bID<=N) && ((x*y)<=isize))
+    if(pixel_loc<isize)
      {
             simage[bID].data[x][y]=ptr[pixel_loc];
      } 
@@ -216,6 +246,12 @@ __global__ void write_density(int* &pd,Blocks* &simage)
             }
         
         }
+        
+        if( checkarc(simage[x].data,gpufilter) > 100 )
+        {
+                pd[x]+=1000;
+        
+        }
 
     }
     
@@ -227,15 +263,19 @@ __host__ int finger_location()
 
         /*Searching Function*/
         dim3 sblocks (1,N);
-        dim3 sthreads (bsize,bsize); // NxN array
+        dim3 sthreads (BSIZE,BSIZE); // NxN array
         
-        splitblocks <<< sblocks,sthreads >>> (gpuptr,small_image);
+        /* 
+           SPLIT CURRENT IMAGE FROM IPCAM TO MULTIPLE IMAGES 
+           THEN FIND THE PIXEL DENSITIES OF THE IMAGES         
+           THEN SYNCHRONIZE THE FINSIHING OF ALL WORKING THREADS
+        */
+        
+        splitblocks <<< sblocks,sthreads >>> (gpuptr,small_images);
+        
+        cudaThreadSynchronize();
               
-        
-        
-        /* Adding Function */
- 
-        write_density <<< 1,200 >>> (pdensity,small_image);
+        write_density <<< 1,200 >>> (pdensity,small_images);
  
             
         /*Synchronize All working threads*/
@@ -265,42 +305,37 @@ return BLOCK;
 
 void CleanImage()
 {
-//cudaFreeHost(cpuptr);
+cudaFreeHost(gpuptr);
 }
 /*Block Thread Process 
 
 Unfinished Cursor Finding Process
-
-__global__ checkarc(bool direction)
-{
-       int bID= BlockIdx.y;
-       int tx=threadIdx.x;
-       
-
-       if(direction == 1) // From Left To Right
-       {
-          if (small_image[bID].data[circle_y(tx)][tx] == 1)
-          {
-                    loc.x=                          //I don't know
-          
-          }       
-       
-       
-       }
-        
-       else
-       {
-             
-        
-        
-        
-       }
-
-
-
-}
 */
-
+__host__ __device__ int checkarc(unsigned char value[][BSIZE],unsigned char* filter)
+{
+        int temp=0,i,j;
+       
+       /*   BITWISE AND WITH THE VALUE 
+            OF THE BLOCK WITH THE FILTER
+            CROSS MATCH WITH REFERENCE VALUE 
+            LATER......
+       */     
+        for(i=0;i<BSIZE;i++)
+          {
+            for(j=0;j<BSIZE;j++)
+            {
+                    if( (value[i][j] && filter[i + (BSIZE*j)] ) == 255 )
+                    {
+                            temp=temp+1;
+                    
+                    }
+                    
+            }
+          
+          }
+        
+     return temp;   
+}
 
 /*Dummy Main Function
   Just To Be On The Safe Side

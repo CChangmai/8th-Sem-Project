@@ -265,7 +265,7 @@ return BLOCK;
 
 void CleanImage()
 {
-//cudaFreeHost(cpuptr);
+cudaFreeHost(cpuptr);
 }
 /*Block Thread Process 
 
