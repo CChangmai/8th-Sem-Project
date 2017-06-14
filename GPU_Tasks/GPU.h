@@ -4,8 +4,11 @@ int finger_location();
 
 unsigned char* CreateFilterAddress();
 
+void RemoveBackground();
 
 unsigned char* MapImageToCPU();
+
+unsigned char* MapSubtractor();
 
 int* assign_threshold();
 
@@ -17,7 +20,18 @@ void CleanImage();
 
 unsigned char* MapFilter();
 
-__device__ int checkarc(unsigned char[][BSIZE],unsigned char*);
+
+void checkSafe(cudaError_t,std::string,int);
+
+__device__ int checkarc(unsigned char*,unsigned char*);
+
+__device__ bool checkRange(int,int,int);
+
+__global__ void find_maxvalue(int*,int*,int *);
+
+__global__ void BGSubtract(unsigned char*,unsigned char*);
+
+
 
 /*May Change it Later.
  Assuming 6 Variables
@@ -35,7 +49,7 @@ __device__ int checkarc(unsigned char[][BSIZE],unsigned char*);
 #endif    
 
 /*Store Pixel Density in CUDA Memory And GPU Memory for Analysis */
-int *gthresh,*pdensity,*maxval,*gputhresh;
+int *pdensity,*cpu_maxval,*gpu_maxval,*gputhresh;
 
 //I will get The Thread ID From The Called Function
 /* 
@@ -48,29 +62,19 @@ int *gthresh,*pdensity,*maxval,*gputhresh;
     
     I THINK ALL OF THESE VARIABLES ARE HOST CODE
 */
-unsigned char *gpuptr,*gpucount;
-__device__ unsigned char *gpufilter; //FOR ACCESS BY BOTH CPU AND GPU
-
-unsigned char* createImageBuffer(unsigned int bytes)
-{
-    unsigned char *ptr = NULL;
-    cudaSetDeviceFlags(cudaDeviceMapHost);
-    cudaHostAlloc(&ptr, bytes, cudaHostAllocMapped);
-    std::cout<<"Adddress Pointed To : "<<(void*)ptr<<std::endl;
-    return ptr;
-}
-
-
+unsigned char *gpuptr,*gpucount,*gpufilter,*gpusubptr; //FOR ACCESS BY BOTH CPU AND GPU
 
 
 typedef struct
 {
-    int h;
-    int w;
-    unsigned char data[BSIZE][BSIZE]; //40x40 image
+   unsigned char data[BSIZE*BSIZE]; //80x80 image
 }Blocks;
 
 
+
+__global__ void splitblocks(unsigned char*, Blocks*);
+//__global__ void write_density(int*,Blocks*);
+__global__ void write_density(int*,unsigned char*);
 /*
     Assign Blocks in CUDA Memory for fast execution
     Blocks Is User-Defined Datatype defined above
@@ -92,63 +96,64 @@ void cleanup()
 }
 
 
+void checkSafe(cudaError_t err,std::string message,int line)
+{
+
+    if(err != cudaSuccess)
+    {
+        std::cout<<"Error At Function : "<<message<<"@ line "<<line<<"\n";
+        std::cout<<cudaGetErrorString(err)<<std::endl;
+    }
+
+
+}
+
 __host__ unsigned char* MapImageToCPU()
 {
     //Add Finger Count Here As Well
     unsigned char* ptr;
                    
                       
-    cudaSetDeviceFlags(cudaDeviceMapHost); 
+    checkSafe(cudaSetDeviceFlags(cudaDeviceMapHost),"Assigning Device Flags @ MapImageToCPU",__LINE__); 
     
     /*Assign Both CPU image and GPU Count*/
     
-    cudaHostAlloc((void**)&ptr,height*width,cudaHostAllocMapped);
+    checkSafe(cudaHostAlloc((void**)&ptr, height * width * sizeof(unsigned char) ,cudaHostAllocMapped), "Allocating CPU Main Image",__LINE__);
         
     /*Assign The GPU Pointer To The Location Made by HostAlloc
                         In CPU Memory */
       
     
-    cudaHostGetDevicePointer((void**)&gpuptr,  (void*)ptr,   0);
-   
-    
-    std::cout<<"\nThe Pointer Allocated in CPU Memory is : "<<(void*)ptr;
-    std::cout<<"\nThe Pointer Allocated in GPU Memory is : "<<(void*)gpuptr;
+    checkSafe(cudaHostGetDevicePointer((void**)&gpuptr,  (void*)ptr,   0),"GPU Host Allocation",__LINE__);
+       
     return ptr;
 } 
 
-__host__ void* MapVariable(int size)
+
+__host__ unsigned char* MapSubtractor()
 {
+    unsigned char *ptr;
+    checkSafe(cudaSetDeviceFlags(cudaDeviceMapHost),"Assigning Device Flags @ Subtractor",__LINE__);
     
-    //Add Finger Count Here As Well
-    void* ptr=NULL;
-      
-    
-    cudaSetDeviceFlags(cudaDeviceMapHost); 
-    /*Assign Both CPU image and GPU Count*/
-    cudaHostAlloc(&ptr,size,cudaHostAllocMapped);
-    
+    checkSafe(cudaHostAlloc(&ptr,height * width * sizeof(unsigned char), cudaHostAllocMapped), "Allocating CPU Subtractor",__LINE__);
+    checkSafe(cudaHostGetDevicePointer((void**)&gpusubptr,  (void*)ptr,   0),"Allocating GPU Subtractor",__LINE__);
     return ptr;
 }
+
 
 __host__ unsigned char* MapFilter()
 {
     
     //Add Finger Count Here As Well
     unsigned char* ptr;
-    cudaSetDeviceFlags(cudaDeviceMapHost); 
+    checkSafe(cudaSetDeviceFlags(cudaDeviceMapHost),"Assigning Device Flags @ Filter",__LINE__); 
     /*Assign Both CPU image and GPU Count*/
-    cudaHostAlloc((void**)&ptr,BSIZE*BSIZE,cudaHostAllocMapped);
-    cudaHostGetDevicePointer((void**)&gpufilter,(void*)ptr,0);
+    checkSafe(cudaHostAlloc((void**)&ptr, BSIZE * BSIZE * sizeof(unsigned char) ,cudaHostAllocMapped),"Assigning CPU Filter",__LINE__);
+    checkSafe(cudaHostGetDevicePointer((void**)&gpufilter,(void*)ptr,0),"Assigning GPU Filter",__LINE__);
     
-    std::cout<<"GPU LOCATION OF FILTER : "<<(void*)gpufilter<<"endl";
-    return ptr;
-}
-
-__host__ void* GetGPUAddress(int* &cpuid)
-{
-    void* ptr;
-    cudaSetDeviceFlags(cudaDeviceMapHost);
-    cudaHostGetDevicePointer((void**)&ptr,(void*)cpuid,0);
+    
+    //std::cout<<"\nGPU LOCATION OF FILTER : "<<(void*)gpufilter<<"\n";
+    checkSafe(cudaDeviceSynchronize(),"Synchroniztion @ Filter",__LINE__);
     return ptr;
 }
 
@@ -156,39 +161,67 @@ __host__ void* GetGPUAddress(int* &cpuid)
 GET A POINTER TO CPU_MEMORY TO ASSIGN THRESHOLD RATHER THAN COPYING ANYTHING TO GPU
 ALSO USE A GLOBAL FUNCTION THAT CAN ASSIGN MEMORY IN DEVICE
 
-__global__ void assign_GPU_variables()
-{
-       
-}
 */
 __host__ int* assign_threshold()
 {
         
       
      //---------CALL A GLOBAL FUNCTION THAT CAN SAFELY ASSIGN GPU MEMORY---------//
-        cudaMalloc(&pdensity,N*sizeof(int));
-        cudaMemset(&pdensity,0,N*sizeof(int));
-        
-        cudaMalloc(&maxval,sizeof(int));
-        cudaMemset(&pdensity,0,sizeof(int));
-        
-        //cudaMalloc(loc,sizeof(Pt));
-        //cudaMalloc(&gpucount,sizeof(int));
-        cudaMalloc(&small_images,N * sizeof(Blocks));
+        checkSafe(cudaMalloc(&pdensity,N * sizeof(int)), "Allocating Density Records",__LINE__);
+        checkSafe(cudaMemset(pdensity,0,N * sizeof(int)), "Assigning 0 to Density",__LINE__);
+   
+        checkSafe(cudaMalloc(&small_images,N * sizeof(Blocks)),"Assigning GPU Block Records",__LINE__);
      //-----------NOW MAP DEVICE MEMORY---------------------------
-     
+        
      int* ptr;
-     cudaSetDeviceFlags(cudaDeviceMapHost); 
-     /*Assign Both CPU image and GPU Count*/
-     cudaHostAlloc(&ptr,5*sizeof(int),cudaHostAllocMapped);
-     cudaHostGetDevicePointer((void**)&gthresh,(void*)ptr,0);
-     std::cout<<"\nThe Pointer Allocated in CPU Memory For Fingers is : "<<(void*)ptr<<"\n";
+         checkSafe(cudaSetDeviceFlags(cudaDeviceMapHost), "Assigning Device Flags @ Threshold",__LINE__); 
+     
+     
+     /*
+        Assign Both CPU MAX VALUE and GPU Count 
+          
+     
+     */
+     
+     checkSafe(cudaHostAlloc( (void**)&ptr, 5 * sizeof(int), cudaHostAllocMapped),"Allocating CPU Threshold",__LINE__);
+     checkSafe(cudaHostGetDevicePointer((void**)&gputhresh,(void*)ptr,0), "Assigning GPU Threshold",__LINE__);
+    
+     checkSafe(cudaHostAlloc( (void**)&cpu_maxval,2 * sizeof(int), cudaHostAllocMapped),"Assigning CPU Max_VAL",__LINE__);
+     checkSafe(cudaHostGetDevicePointer((void**)&gpu_maxval,(void*)cpu_maxval,0), "Assigning GPU MAX_VAL",__LINE__);
+     
+     //std::cout<<"\nThe Pointer Allocated in CPU Memory For Fingers is : "<<(void*)ptr<<"\n";
+     
      return ptr;
 }     
  
  /* I'm Calling Split Blocks According To Symmetric Blocks And Threads  */
  
-__global__ void splitblocks(unsigned char* ptr,Blocks* &simage) 
+ void RemoveBackground()
+ {
+   
+    dim3 numblocks(2,24);
+    dim3 numthreads(BSIZE,BSIZE);
+    
+    BGSubtract <<< numblocks,numthreads >>> (gpuptr,gpusubptr);
+    
+    checkSafe(cudaThreadSynchronize(),"Synchronization At Background Removal",__LINE__);
+ }
+ 
+ 
+ __global__ void BGSubtract(unsigned char* img1,unsigned char* img2)
+ {
+        int pos = ( blockIdx.x * gridDim.x ) + threadIdx.x + ( threadIdx.y * blockDim.x );
+ 
+        if( pos < isize )
+        {
+                img1[pos]= img1[pos] ^ img2[pos];
+        
+        }
+ 
+ 
+ }
+ 
+__global__ void splitblocks(unsigned char* ptr,Blocks* simage) 
 {                                                           
  /* Format of dim3 is (x,y,z)
     If we assign (1,200) that means 1 grid and 200 blocks 
@@ -197,7 +230,7 @@ __global__ void splitblocks(unsigned char* ptr,Blocks* &simage)
     y=200
  */   
  
-  int bID=blockIdx.y;
+  int bID=blockIdx.x;
   int x=threadIdx.x;
   int y=threadIdx.y;
   
@@ -216,44 +249,56 @@ __global__ void splitblocks(unsigned char* ptr,Blocks* &simage)
   */
   
   int pixel_loc = (bID * BSIZE) + (y * width) + x ; 
-  
+  int blockID   = x + (y * BSIZE); 
   /* 
      I'm not doing this in a single loop because all threads might access the same 
      pixel density variable, which might lead to Use of Extra atomic Functions
      So, I separated The Image into a grid for easy access
   */   
   
-    if(pixel_loc<isize)
-     {
-            simage[bID].data[x][y]=ptr[pixel_loc];
-     } 
+   // if(pixel_loc<isize)
+   //  {
+            simage[bID].data[blockID]=ptr[pixel_loc];
+   //  } 
+      
 }
 
 
-__global__ void write_density(int* &pd,Blocks* &simage)
+__global__ void write_density(int* pd,unsigned char* simage)
+
     {
-        int x=threadIdx.x;
+        //Blocks* simage) GOES IN FUNCTION LINE
+        /*int i,j,x=threadIdx.x;
         pd[x]=0;
-        int i,j;
         for(i=0;i<N;i++)
         {
             for(j=0;j<N;j++)
             {
-               if(simage[x].data[i][j]==1)
+               if(simage[x].data[( i * BSIZE) + j] == 0 )
                {
-                 pd[x]++; //This addition is threadsafe
+                 atomicAdd(&pd[x],1); //This addition is threadsafe
                }
             
             }
         
         }
+        */
         
-        if( checkarc(simage[x].data,gpufilter) > 100 )
-        {
-                pd[x]+=1000;
         
-        }
-
+         
+  int bID=blockIdx.x;
+  int x=threadIdx.x;
+  int y=threadIdx.y;
+  
+  int pixel_loc = (bID * BSIZE) + (y * width) + x ; 
+  int blockID   = x + (y * BSIZE); 
+  
+               if(simage[pixel_loc] == 0 )
+               {
+                 atomicAdd(&pd[blockID],1); //This addition is threadsafe
+               }
+  
+        
     }
     
  
@@ -263,8 +308,9 @@ __host__ int finger_location()
 /*Assuming I've Already Have Assigned CPU Image Mapped Pointer */
 
         /*Searching Function*/
-        dim3 sblocks (1,N);
-        dim3 sthreads (BSIZE,BSIZE); // NxN array
+        //dim3 sblocks (1,N);
+             
+       dim3 sthreads (BSIZE,BSIZE); // NxN array
         
         /* 
            SPLIT CURRENT IMAGE FROM IPCAM TO MULTIPLE IMAGES 
@@ -272,35 +318,27 @@ __host__ int finger_location()
            THEN SYNCHRONIZE THE FINSIHING OF ALL WORKING THREADS
         */
         
-        splitblocks <<< sblocks,sthreads >>> (gpuptr,small_images);
-        
-        cudaThreadSynchronize();
-              
-        write_density <<< 1,200 >>> (pdensity,small_images);
- 
-            
-        /*Synchronize All working threads*/
-            
-        cudaThreadSynchronize();
-        
+        //splitblocks <<< N ,sthreads >>> (gpuptr,small_images);
+        //checkSafe(cudaThreadSynchronize(),"Synchronization @ Finding Fingers",__LINE__);
+                    
+        write_density <<< N,sthreads >>> (pdensity, gpuptr);
+        checkSafe(cudaThreadSynchronize(),"Synchronization @ Finding Fingers",__LINE__);    
+                 
+                      
         /* Simple CALLING Function after Doing Everything */    
          
+        find_maxvalue <<<1,1>>> (pdensity,gputhresh,gpu_maxval); 
         
-        int BLOCK;
+        /*Synchronize All working threads*/
         
-        for(int i=0;i<N;i++)
-        {
-           if(pdensity[i]<gputhresh[0])
-           {
-              BLOCK=i;
-           }    
+        checkSafe(cudaThreadSynchronize(),"Synchronization @ Finding Fingers",__LINE__);
         
-        }
-         
-
-
-cleanup();
-return BLOCK;
+            
+        std::cout<<(void*)gpuptr<<"\n";    
+            
+      
+ 
+ return cpu_maxval[0];
 
 }
 
@@ -309,12 +347,44 @@ void CleanImage()
 cudaFreeHost(gpuptr);
 }
 /*Block Thread Process 
-
 Unfinished Cursor Finding Process
 */
-__device__ int checkarc(unsigned char value[][BSIZE],unsigned char* filter)
+
+__device__ bool checkRange(int value,int threshold,int deviation)
 {
-        int temp=0,i,j;
+return ( ( value > ( threshold - deviation) ) && (value < ( threshold + deviation) ) );
+
+}
+
+
+__global__ void find_maxvalue(int* array,int* records,int* value)
+{
+    int i,j,BLOCK=-1;
+    
+    for(i=0;i<N;i++)
+    {
+            for(j=0;j<5;j++)
+            {
+                if( checkRange(array[i],records[j],100) == 1 )
+                {  
+                BLOCK = i;  
+                }
+                         
+            }
+    
+    }
+
+    value[0]=BLOCK;
+
+
+}
+
+
+
+
+__device__ int checkarc(unsigned char* value,unsigned char* filter)
+{
+        int temp=0,i,j,pos=0;
        
        /*   BITWISE AND WITH THE VALUE 
             OF THE BLOCK WITH THE FILTER
@@ -325,7 +395,10 @@ __device__ int checkarc(unsigned char value[][BSIZE],unsigned char* filter)
           {
             for(j=0;j<BSIZE;j++)
             {
-                    if( (value[i][j] && filter[i + (BSIZE*j)] ) == 255 )
+            
+                    pos= i + (j * BSIZE);
+                    
+                    if( (value[pos] && filter[pos] ) == 255 )
                     {
                             temp=temp+1;
                     

@@ -15,6 +15,9 @@
 #include<math.h>
 
 #ifndef HAS_SIZE
+    #define WIDTH 640
+    #define HEIGHT 480
+    #define SIZE 48
     #define BSIZE 80
     #define HAS_SIZE
 #endif
@@ -23,7 +26,9 @@
 
 cv::Mat filter(BSIZE,BSIZE,CV_8UC1);
 const int threshold=(int)(0.25*(BSIZE*BSIZE));//60% of space 
-
+int cpudensity[SIZE];
+int localdensity[5];
+int c=0;
 
 bool inRange(int value,int center,int deviation)
 {
@@ -70,7 +75,7 @@ void make_Filter()
         filter.at<uchar>( (BSIZE - j ) , ( BSIZE / 2 ) + i - 15 ) =     255;
   
       }
-      
+      /*-----------------------------FOR DEBUGGING PURPOSES------------------
       cv::namedWindow("Filter");
       cv::namedWindow("Trace");
       cv::namedWindow("Thresholding");
@@ -78,7 +83,7 @@ void make_Filter()
       cv::imshow("Filter",filter);
       cv::waitKey(0);
       cv::destroyWindow("Filter");
-
+     */
 
 }
 
@@ -154,6 +159,10 @@ int Calibrate_Finger(cv::Mat &img,cv::Mat &prev,
     */
     
     cv::threshold(temp_img,temp_img1,0, 255, CV_THRESH_BINARY_INV | CV_THRESH_OTSU);
+    /* 
+    --------------------------FOR DEBUGGING PURPOSES--------------------------
+    
+      
     cv::imshow("Trace",prev);
     cv::imshow("Thresholding",temp_img1);
     cv::waitKey(1);
@@ -182,7 +191,7 @@ int Calibrate_Finger(cv::Mat &img,cv::Mat &prev,
    
     cross_match=cv::countNonZero(temp_img2); 
     cv::imshow("Crossmatch",temp_img2);
-    
+    cv::waitKey(1);
     /*
       I'm assuming 100+ points should intersect 
       in the curve if the finger 
@@ -194,12 +203,82 @@ int Calibrate_Finger(cv::Mat &img,cv::Mat &prev,
     if( inRange( pixel_density, threshold , 100 ) && inRange( cross_match , 60 , 10 ) )
     {
     
-       std::cout<<"\n Calibration Successful : "<<pixel_density<<"\n";
+        localdensity[c]=pixel_density;
+        c++;
+       //std::cout<<"\n Calibration Successful : "<<pixel_density<<"\n";
        return pixel_density;
     }
     else
     {
-       std::cout<<"Please make sure Background is Static : "<<pixel_density<<"\nAnd Cross Match Is : "<<cross_match<<"\n";
+       //std::cout<<"Please make sure Background is Static : "<<pixel_density<<"\nAnd Cross Match Is : "<<cross_match<<"\n";
        return 0;
     }
-}         
+}    
+
+int Find_BlockCPU(cv::Mat &pic)
+{
+
+        int i,j,count=0,density=0,cross_match=0,b=-1;
+        
+        for(i=0;i<pic.rows;i+=BSIZE)
+            {
+            
+                density=0;
+                cross_match=0;
+                
+                for(j=0;j<pic.cols;j+=BSIZE)
+                {
+                
+                   cv::Rect temp(j,i,BSIZE,BSIZE);
+                   cv::Mat temp_img = pic(temp).clone(); 
+                   density=cv::countNonZero(temp_img);
+                   
+                   cv::bitwise_and(temp_img,filter,temp_img);
+                   cross_match = cv::countNonZero(temp_img);
+                   
+                   for(int k=0;k<5;k++)
+                   {
+                   
+                        if( inRange(density,localdensity[k] , 100 )  && inRange(cross_match,60,25) )
+                            { 
+                    
+                             b=count; 
+                    
+                            }
+                    
+                   } 
+                   
+                   count++; 
+                
+                  }
+            
+             }
+            
+            
+     return b;       
+            
+}
+
+           
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+     
