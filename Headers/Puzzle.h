@@ -92,14 +92,16 @@ bool Assign_Puzzle(char* s,int bwidth,int bheight,int swidth,int sheight,cv::Sca
                     for(j=0;j<swidth;j+=bwidth)
                     {
                     
-                                          cv::rectangle(image,
-                                          cv::Point(j,i),
-                                          cv::Point(j+bwidth,j+bheight),
-                                          Color,
-                                          4,
-                                          0.25,
-                                          0);
-                                          
+                                                                     
+                                        cv::rectangle(image,
+                                        cv::Point(j,i),
+                                        cv::Point(j+bwidth-1,j+bheight-1),
+                                        Color,
+                                        4,
+                                        0.25,
+                                        0);
+                                                             
+                                       
                             //KEEP TRACK OF BLOCK ASSIGNMENT 
                             records[count]=count;
                             count++;
@@ -108,12 +110,13 @@ bool Assign_Puzzle(char* s,int bwidth,int bheight,int swidth,int sheight,cv::Sca
             
             }
       
+      /*
              cv::rectangle(image,cv::Point(0,400),cv::Point(80,479),Color,4,0.25,0);
              cv::rectangle(image,cv::Point(80,400),cv::Point(160,479),Color,4,0.25,0);
              cv::rectangle(image,cv::Point(160,400),cv::Point(240,479),Color,4,0.25,0);
              cv::rectangle(image,cv::Point(240,400),cv::Point(320,479),Color,4,0.25,0);
              cv::rectangle(image,cv::Point(320,400),cv::Point(400,479),Color,4,0.25,0);        
-      
+      */
       Puzzle=image.clone();
      
     

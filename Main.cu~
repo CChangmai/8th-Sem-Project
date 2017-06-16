@@ -26,6 +26,9 @@
 
 
 #define BSIZE 80
+#define WIDTH 640
+#define HEIGHT 480
+#define HAS_SIZE
 //const int wait_period=100;
 
 
@@ -97,8 +100,7 @@ int main(int argc, char* argv[])
        {
           return 0;
        }
-      
-       //Get The Feed From IPCAM
+
        try
        {
        Puzzle_Rearrange();
@@ -124,12 +126,16 @@ int main(int argc, char* argv[])
         */
                 gpulock=true;
                 
-                cv::Mat gpuImg(OvImg.size(),CV_8U,MapImageToCPU());
-                cv::Mat gpuImg2(OvImg.size(),CV_8U,MapSubtractor());
+                cv::Mat gpuImg(OvImg.size(),CV_8UC1,(void*)MapImageToCPU(1));
+                cv::Mat gpuImg2(OvImg.size(),CV_8UC1,(void*)MapImageToCPU(2);
                 
-                cv::Mat gfilter(BSIZE,BSIZE,CV_8U,MapFilter());
-                //cv::Mat gpuImg(OvImg.size(),CV_8U,createImageBuffer(OvImg.rows * OvImg.cols));
-                gpuImg2.setTo(0);
+                cv::Mat gfilter(BSIZE,BSIZE,CV_8UC1,MapFilter());
+                make_Filter(gfilter);
+                
+                std::cout<<"Filter in GPU : "<<gfilter<<"\n";
+                
+               // gpuImg.setTo(0);
+               // gpuImg2.setTo(0);
                 
                 gpulock=false;
          
@@ -156,7 +162,7 @@ int main(int argc, char* argv[])
            
         */
         make_Filter();
-        make_Filter(gfilter);
+        
           
         prevRect.setTo(0);
         
@@ -184,7 +190,7 @@ int main(int argc, char* argv[])
                    THIS IS THE CULPRIT THAT RUINED MY LIFE
                    ASSERTION FAILED ERRORS SHOW HERE
                    */
-                    int j= Calibrate_Finger(OvImg,
+                    int j = Calibrate_Finger(OvImg,
                                             prevRect,
                                             OvImg.rows,
                                             OvImg.cols,
@@ -196,10 +202,13 @@ int main(int argc, char* argv[])
                     {
                         pcount[i]=j;
                         calibrated=true;
+                        
+                        Write_Text(message,OvImg);
                         Draw_Box(OvImg,cv::Scalar(0,255,0),640,480);
+                        
                         cv::imshow("Puzzle", OvImg);
-                        IPCAM::RefreshRx(2.0);
                         std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+                        IPCAM::RefreshRx(5.0);
                         cv::waitKey(1);       
                         
                         /* WHEN WE FIND A MATCH WE DO TWO THINGS
@@ -232,6 +241,7 @@ int main(int argc, char* argv[])
                          
                          IPCAM::getRx(OvImg);
                          
+                         Write_Text(message,OvImg);
                          Draw_Box(OvImg,cv::Scalar(0,0,255),640,480);
                          cv::imshow("Puzzle",OvImg);          
                          cv::waitKey(1);      
@@ -261,11 +271,11 @@ int main(int argc, char* argv[])
         
         */
         
-        std::thread Draw(Draw_Everything,std::ref(ProcImg_Color));
+        //std::thread Draw(Draw_Everything,std::ref(ProcImg_Color));
         std::thread Locate(Finger_Track);
         
         
-        Draw.detach();
+        //Draw.detach();
         Locate.detach();
         /*
            THIS THREAD WILL BE MADE ONLY AFTER 
@@ -317,15 +327,15 @@ int main(int argc, char* argv[])
                                     5,
                                     0);
               */
-              cv::threshold(ProcImg_Gray,gpuImg,0, 255, CV_THRESH_BINARY + CV_THRESH_OTSU); 
+              cv::threshold(ProcImg_Gray,gpuImg,0, 255, CV_THRESH_BINARY_INV + CV_THRESH_OTSU); 
+                                 
+              RemoveBackground();
               
-                                      
-              //RemoveBackground();
+             //gpuImg.copyTo(gpuImg2);
               
-              //gpuImg.copyTo(gpuImg2);
-              
-              cv::imshow("GPU Image",gpuImg);          
-              cv::waitKey(1);  
+              cv::imshow("GPU Image",gpuImg2);  
+                         
+               
              // std::cout<<"\n I am here \n";
               gpulock=false;
           }
@@ -337,7 +347,6 @@ int main(int argc, char* argv[])
           if (draw_wait==false)
           {
            draw_wait=true;
-           
            Blend_Puzzle(OvImg,0.60);
            imshow("Puzzle",OvImg);
            cv::waitKey(1);
@@ -346,7 +355,7 @@ int main(int argc, char* argv[])
            
           }           
        
-        }while( ( IPCAM::status== 1 ) );// && (isPuzzleComplete()==false) );
+        }while( IPCAM::status== 1 );// && (isPuzzleComplete()==false) );
 
   }
   catch(...)
@@ -405,13 +414,19 @@ void Finger_Track()
             while( close_threads == false )
             {
             
-                
+               try
+               { 
 
-                if(gpulock==false)
-                {
+                while(gpulock==true)
+                {}
+                
+                   /*GPU LOCK BECOMES FALSE HERE
+                     SET IT TO TRUE AND DO WORK
+                   */  
                    gpulock=true;
                    
                    std::cout<<"Block Location : " <<new_block<<std::endl;
+                   
                    
                    /* 
                       IF FINGER IS AT DEFAULT VALUE I.E -1
@@ -419,39 +434,26 @@ void Finger_Track()
                       OTHERWISE ASSUME THAT THE FINGER
                       LOCATION IS STORED FROM A PREVIOUS VALUE
                    */   
-                  
-                    if(prev_block==-1)
-                         {
-                             prev_block=finger_location();
+                   prev_block=finger_location();
                              
-                         }
-                  
+                                    
                    gpulock=false;            
-                   
+              
                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
                    /*
                      AFTER 500ms we AGAIN CHECK IF ITS SAFE 
                      TO ACCESS GPU MEMORY
                    */  
-                   if(gpulock==false)
-                      {
+                   while(gpulock==true)
+                   { }
+                   /* LOCK THE GPU AFTER A WAITING TIME */
+                  
                             gpulock=true;
                             new_block=finger_location();
-                            if(new_block>0)
-                            {
-                                if(draw_wait==false)
-                                {
-                                    draw_wait=true;
-                                    Draw_Single(new_block,cv::Scalar(255,0,0));
-                                    draw_wait=false;
-                                
-                                }
-                            }
-                            
-                            gpulock=false;                   
-                      }
+                            gpulock=false;      
+                  
                    
-                   if( (prev_block==new_block) && (prev_block>0) )
+                   if ( (prev_block==new_block) && (prev_block>0) )
                    {
                      /*
                         COMPLEMENT THE PREVIOUS DRAG STATE
@@ -467,22 +469,53 @@ void Finger_Track()
                         DRAG HAS STARTED
                       */                   
                      drag=!drag;
+                   
                      
-                     if ( (drag==false) && (draw_wait == false) )
+                     if ( (drag==false) && (drag_block != new_block) ) 
                      {
+                       while( draw_wait == true )
+                       {}
+                     
                        draw_wait=true;
                        Swap_Pieces(drag_block,new_block,BSIZE);
                        draw_wait=false;
+                       
+                       
+                       
                      }
+                     else if ( (drag==false) && ( drag_block=new_block ) ) 
+                     {
+                       while( draw_wait == true )
+                       {}
+                       draw_wait=true;
+                       Draw_Single(new_block,cv::Scalar(0,0,255));
+                       //draw_wait=false;
+                     }        
                      else
                      {
+                        while( draw_wait == true )
+                        {}
+                        draw_wait=true;
                         drag_block=new_block;
-                        
+                        Draw_Single(new_block,cv::Scalar(255,0,0));
+                        draw_wait=false;
                      
-                     }                
-                        
-                    }
-                 }
+                     }    
+                     
+                   
+                
+                  }
+               
+               
+               }
+               
+               catch(...)
+               {
+                    draw_wait=false;
+                    gpulock=false;
+               
+               }
+                 
             }     
     }
     

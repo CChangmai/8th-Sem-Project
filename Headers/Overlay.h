@@ -21,7 +21,7 @@ void Write_Text(std::vector <std::string> &temp,cv::Mat &pic)
     for(int i=0; i<temp.size();i++)
     {
                         putText(pic,temp[i].c_str(), cv::Point(0,(pic.rows-start_pt+(i*20))), 
-                                            cv::FONT_HERSHEY_COMPLEX_SMALL, 0.8, cvScalar(200,200,250), 1, CV_AA);
+                                            cv::FONT_HERSHEY_COMPLEX_SMALL, 0.8, cvScalar(255,100,50), 1, CV_AA);
 
                         
     }   

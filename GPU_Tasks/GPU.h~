@@ -66,7 +66,7 @@ __device__ int checkarc(Blocks*,unsigned int,unsigned char*);
 
 __device__ bool checkRange(int,int,int,Blocks*,unsigned char*);
 
-__global__ void find_maxvalue(int*,int*,int *,Blocks*,unsigned char*);
+__global__ void find_maxvalue(int*,int*,int *);
 
 __global__ void BGSubtract(unsigned char*,unsigned char*);
 
@@ -113,32 +113,26 @@ __host__ unsigned char* MapImageToCPU(int ch=1)
     unsigned char* ptr;
                    
                       
-    checkSafe(cudaSetDeviceFlags(cudaDeviceMapHost),
-              "Assigning Device Flags @ MapImageToCPU",
-              __LINE__); 
+    checkSafe(cudaSetDeviceFlags(cudaDeviceMapHost),"Assigning Device Flags @ MapImageToCPU",__LINE__); 
     
     /*Assign Both CPU image and GPU Count*/
     
-    checkSafe(cudaHostAlloc((void**)&ptr, HEIGHT * WIDTH * sizeof(unsigned char) ,cudaHostAllocMapped),
-                            "Allocating CPU Main Image",
-                            __LINE__);
+    checkSafe(cudaHostAlloc((void**)&ptr, HEIGHT * WIDTH * sizeof(unsigned char) ,cudaHostAllocMapped), 
+              "Allocating CPU Main Image",
+              __LINE__);
         
     /*Assign The GPU Pointer To The Location Made by HostAlloc
                         In CPU Memory */
       
     switch(ch)
     {
-        case 1 : 
-              checkSafe(cudaHostGetDevicePointer((void**)&gpuptr,  (void*)ptr,   0),
-              "GPU Host Allocation",
-              __LINE__);
+        case 1: 
+              checkSafe(cudaHostGetDevicePointer((void**)&gpuptr,  (void*)ptr,   0),"GPU Host Allocation",__LINE__);
              
              break;
         
-        case 2 :
-                checkSafe(cudaHostGetDevicePointer((void**)&gpusubptr,  (void*)ptr,   0),
-                "Allocating GPU Subtractor",
-                __LINE__);        
+        case 2:
+                checkSafe(cudaHostGetDevicePointer((void**)&gpusubptr,  (void*)ptr,   0),"Allocating GPU Subtractor",__LINE__);        
                 
                 break;
         
@@ -220,7 +214,7 @@ __host__ int* assign_threshold()
  void RemoveBackground()
  {
    
-    dim3 numblocks(32,24);
+    dim3 numblocks(24,32);
     dim3 numthreads(20,20);
     
     BGSubtract <<< numblocks,numthreads >>> (gpuptr,gpusubptr);
@@ -234,11 +228,11 @@ __host__ int* assign_threshold()
         int x = ( blockIdx.x * blockDim.x ) + threadIdx.x;
         int y = ( blockIdx.y * blockDim.y ) + threadIdx.y;
         
-        int pos = x + ( y * WIDTH ) ;
+        int pos = x + ( y * WIDTH) ;
         
         if( pos < isize )
         {
-                img1[pos]= img1[pos] - img2[pos];
+                img2[pos]= 255 ; //img1[pos] ^ img2[pos];
         
         }
  
@@ -300,7 +294,7 @@ __global__ void write_density(int* pd, Blocks* simage)
         {
             for(j=0;j<N;j++)
             {
-               if(simage[x].data[( i * BSIZE) + j] == 255 )
+               if(simage[x].data[( i * BSIZE) + j] == 0 )
                {
                  pd[x]++; //This addition is threadsafe
                }
@@ -334,9 +328,9 @@ __host__ int finger_location()
 /*Assuming I've Already Have Assigned CPU Image Mapped Pointer */
 
         /*Searching Function*/
-       dim3 sblocks(32,24);
+        //dim3 sblocks (1,N);
              
-       dim3 sthreads(20,20); // NxN array
+       dim3 sthreads (BSIZE,BSIZE); // NxN array
         
         /* 
            SPLIT CURRENT IMAGE FROM IPCAM TO MULTIPLE IMAGES 
@@ -344,11 +338,11 @@ __host__ int finger_location()
            THEN SYNCHRONIZE THE FINSIHING OF ALL WORKING THREADS
         */
         
-        splitblocks <<< sblocks ,sthreads >>> (gpuptr,small_images);
+        //splitblocks <<< N ,sthreads >>> (gpuptr,small_images);
         //checkSafe(cudaThreadSynchronize(),"Synchronization @ Finding Fingers",__LINE__);
                     
         write_density <<< N,1 >>> (pdensity, small_images);
-        //checkSafe(cudaThreadSynchronize(),"Synchronization @ Finding Fingers",__LINE__);    
+        checkSafe(cudaThreadSynchronize(),"Synchronization @ Finding Fingers",__LINE__);    
                  
                       
         /* Simple CALLING Function after Doing Everything */    

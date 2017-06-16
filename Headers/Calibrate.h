@@ -92,24 +92,30 @@ void make_Filter(cv::Mat &pic)
     int i,j;
     pic.setTo(0);
 
-      for(i=0;i<BSIZE;i++)
+      for(i=0;i<(BSIZE/2);i++)
       {
         /*Since 0,0 lies on the top left corner
           We want 0,0 from the bottom left corner
           So we have to subtract the coordinate from 100 to get the actual distance
           
-          The Other Arc Is Found When we move or solve the equation of the circle
-          to the negative x-axis
-          So we substitute that value for x + offset, which is 100
+          The Other Arc Is Found When we move to a negative x-axis
+          So we substitute that value by
+          x + offset + (0.5 * finger width) 
+          which is assumed to be 15 each side
+          The OFFSET is half the block size
         */
         
-        j=(int)sqrt((BSIZE*BSIZE)-(i*i));
+        j=(int)sqrt( ( (BSIZE*BSIZE)/4) - (i*i) );
         
-        pic.at<uchar>(BSIZE-i,BSIZE-j)     =     255;    
-        pic.at<uchar>(BSIZE-i,j) =               255;
+        //POSITIVE HALF + OFFSET
+        
+        pic.at<uchar>( (BSIZE - j ) , ( BSIZE / 2 ) - i + 15 )   =  255;    
+        
+        //NEGATIVE HALF + OFFSET
+        
+        pic.at<uchar>( (BSIZE - j ) , ( BSIZE / 2 ) + i - 15 ) =     255;
   
       }
-
 
 }
 
@@ -239,7 +245,7 @@ int Find_BlockCPU(cv::Mat &pic)
                    for(int k=0;k<5;k++)
                    {
                    
-                        if( inRange(density,localdensity[k] , 100 )  && inRange(cross_match,60,25) )
+                        if( inRange(density,localdensity[k] , 100 )  && inRange(cross_match,60,30) )
                             { 
                     
                              b=count; 

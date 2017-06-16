@@ -56,7 +56,7 @@ bool close_threads=false;
 int  pcount[5];
 
 void Finger_Track(cv::Mat&);
-//void Draw_Everything(cv::Mat);
+void Draw_Everything();
 
 /*Assigning A New Window To Be Globally Accessed To All Threads*/
 
@@ -92,7 +92,7 @@ int main(int argc, char* argv[])
        Puzzle_Rearrange();
      
        IPCAM::startRx(); 
-       cv::Mat OvImg(WIDTH,HEIGHT,CV_8U);
+       cv::Mat OvImg(HEIGHT,WIDTH,CV_8U);
              
        IPCAM::getRx(OvImg);
        
@@ -104,7 +104,7 @@ int main(int argc, char* argv[])
          THEN ALLOCATE BINARY IMAGE FROM GPU CLONES
        */
        
-        cv::Mat ProcImg,ImgBW(WIDTH,HEIGHT,CV_8UC1);
+        cv::Mat ProcImg,ImgBW(HEIGHT,WIDTH,CV_8UC1);
         /*
         Allocate Memory via GPU and set gpulock to true during this process
         */
@@ -119,6 +119,7 @@ int main(int argc, char* argv[])
         
         cv::namedWindow("Puzzle Application");
         cv::namedWindow("Threshold");
+        cv::namedWindow("Fast Data");
         /* GET THE FINGERS CALIBRATED FROM THE DATA FOR FIVE FINGERS */
         
         for(int i=0;i<5;i++)
@@ -183,11 +184,13 @@ int main(int argc, char* argv[])
         }
         
         
-        //std::thread Draw(Draw_Everything,std::ref(OvImg));
+        cv::destroyWindow("Crossmatch");
+        
+       //std::thread Draw(Draw_Everything);
        std::thread Locate(Finger_Track,std::ref(ImgBW));
         
         
-        //Draw.detach();
+       //Draw.detach();
        Locate.detach();
         
         
@@ -312,8 +315,10 @@ void Finger_Track(cv::Mat &img)
                       */                   
                      drag=!drag;
                      
-                     if ( (drag==false) && (draw_wait == false ) && (drag_block != new_block) ) 
+                     if ( (drag==false) && (drag_block != new_block) ) 
                      {
+                       while( draw_wait == true )
+                       {}
                        draw_wait=true;
                        Swap_Pieces(drag_block,new_block,BSIZE);
                        draw_wait=false;
@@ -321,16 +326,22 @@ void Finger_Track(cv::Mat &img)
                        
                        
                      }
-                     else if ( drag==true ) 
+                     else if ( (drag==false) && ( drag_block=new_block ) ) 
                      {
-                        drag_block=new_block;
-                        draw_wait=true;
-                        Draw_Single(new_block,cv::Scalar(255,0,0));
-                        draw_wait=false;
+                       while( draw_wait == true )
+                       {}
+                       draw_wait=true;
+                       Draw_Single(new_block,cv::Scalar(0,0,255));
+                       draw_wait=false;
                      }        
                      else
                      {
-                     
+                        while( draw_wait == true )
+                        {}
+                        draw_wait=true;
+                        drag_block=new_block;
+                        Draw_Single(new_block,cv::Scalar(255,0,0));
+                        draw_wait=false;
                      
                      }        
                 
@@ -347,10 +358,21 @@ void Finger_Track(cv::Mat &img)
         }     
         
    }
-        
-        
-        
-       
-        
+    
+}
+
+void Draw_Everything()
+{
+    cv::Mat ThreadDraw;
+    while(close_threads == false)
+    {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    IPCAM::getRx(ThreadDraw);
+    Blend_Puzzle(ThreadDraw,0.60);
+    imshow("Fast Data",ThreadDraw);
+    cv::waitKey(1);
+    }
+    
+
 }
         
