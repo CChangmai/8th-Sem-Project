@@ -8,11 +8,11 @@ void RemoveBackground();
 
 unsigned char* MapImageToCPU(int);
 
-unsigned char* MapSubtractor();
+unsigned char* MapCalibrator(int);
 
 int* assign_threshold();
 
-void* MapVariable(int);
+int* MapValues(int);
 
 void* GetGPUAddress(int*);
 
@@ -20,9 +20,13 @@ void CleanImage();
 
 unsigned char* MapFilter();
 
+void calculateHistogram();
 
 void checkSafe(cudaError_t,std::string,int);
 
+void ConvertBox(); 
+
+void TransferValues(unsigned char*,int*,float*);
 
 /*May Change it Later.
  Assuming 6 Variables
@@ -32,6 +36,7 @@ void checkSafe(cudaError_t,std::string,int);
 
 #define isize 307200
 #define N 48
+#define DELTA 128
 
 #ifndef HAS_SIZE
     #define BSIZE 80
@@ -41,7 +46,10 @@ void checkSafe(cudaError_t,std::string,int);
 #endif    
 
 /*Store Pixel Density in CUDA Memory And GPU Memory for Analysis */
-int *pdensity,*cpu_maxval,*gpu_maxval,*gputhresh;
+int *pdensity,*cpu_maxval,*gpu_maxval,*gputhresh,*arcs;
+
+__constant__ float f_ratios[10];
+__constant__ unsigned char f_values[10];
 
 //I will get The Thread ID From The Called Function
 /* 
@@ -54,25 +62,40 @@ int *pdensity,*cpu_maxval,*gpu_maxval,*gputhresh;
     
     I THINK ALL OF THESE VARIABLES ARE HOST CODE
 */
-unsigned char *gpuptr,*gpucount,*gpufilter,*gpusubptr; //FOR ACCESS BY BOTH CPU AND GPU
+unsigned char *gpuptr,*gpucount,*gpufilter,*gpusubptr,*gpu_R,*gpu_G,*gpu_B,*gpu_Y,*gpu_Cr,*gpu_Cb; //FOR ACCESS BY BOTH CPU AND GPU
+unsigned char *calibrate_R,*calibrate_G,*calibrate_B,*calibrate_Y,*calibrate_Cr,*calibrate_Cb;
 
 
 typedef struct
 {
-   unsigned char data[BSIZE*BSIZE]; //80x80 image
+   unsigned char data[BSIZE * BSIZE]; //80x80 image
 }Blocks;
 
-__device__ int checkarc(Blocks*,unsigned int,unsigned char*);
+__device__ bool checkRange(int,int,int);
 
-__device__ bool checkRange(int,int,int,Blocks*,unsigned char*);
+__device__ bool checkRange(int,int,int,int);
 
-__global__ void find_maxvalue(int*,int*,int *,Blocks*,unsigned char*);
+__device__ bool checkRange(unsigned char,unsigned char,unsigned char);
 
-__global__ void BGSubtract(unsigned char*,unsigned char*);
+__device__ bool checkRange(float,float,float,float);
+
+__device__ float GetPart(float,int);
+
+__global__ void find_arcs(int*,Blocks*,unsigned char*);
+
+__global__ void find_maxvalue(int*,int*,int*);
+
+__global__ void BGSubtract(unsigned char*,unsigned char*,unsigned char*,unsigned char*);
 
 __global__ void splitblocks(unsigned char*, Blocks*);
-//__global__ void write_density(int*,Blocks*);
+
+__global__ void PrintK(int*);
+
+__global__ void Make_Histogram();
+
 __global__ void write_density(int*,Blocks*);
+
+__global__ void Find_YCrCb(unsigned char*,unsigned char*,unsigned char*,unsigned char*,unsigned char*,unsigned char*,int);
 /*
     Assign Blocks in CUDA Memory for fast execution
     Blocks Is User-Defined Datatype defined above
@@ -105,6 +128,17 @@ void checkSafe(cudaError_t err,std::string message,int line)
     }
 
 
+}
+
+
+void TransferValues(unsigned char* ptr,int* density,float *ptr2)
+{
+    cudaMemcpyToSymbol(f_values,(void*)ptr,10 * sizeof(unsigned char),0,cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(f_ratios,(void*)ptr2,10 * sizeof(float),0,cudaMemcpyHostToDevice);
+    PrintK <<<1,1>>> (NULL);
+    
+    for(int i=0;i<5;i++)
+    { std::cout<<density[i]<<" "; }
 }
 
 __host__ unsigned char* MapImageToCPU(int ch=1)
@@ -142,6 +176,47 @@ __host__ unsigned char* MapImageToCPU(int ch=1)
                 
                 break;
         
+        case 3:
+                 checkSafe(cudaHostGetDevicePointer((void**)&gpu_R,  (void*)ptr,   0),
+                "Allocating GPU R-Plane",
+                __LINE__);        
+                
+                break;
+                
+        case 4: 
+                checkSafe(cudaHostGetDevicePointer((void**)&gpu_G,  (void*)ptr,   0),
+                "Allocating GPU G-Plane",
+                __LINE__);        
+                
+                break;        
+        case 5:
+                checkSafe(cudaHostGetDevicePointer((void**)&gpu_B,  (void*)ptr,   0),
+                "Allocating GPU B-Plane",
+                __LINE__);        
+                
+                break;      
+                
+        case 6:
+                checkSafe(cudaHostGetDevicePointer((void**)&gpu_Y,  (void*)ptr,   0),
+                "Allocating GPU Y-Plane",
+                __LINE__);        
+                
+                break;           
+                
+        case 7:
+                checkSafe(cudaHostGetDevicePointer((void**)&gpu_Cr,  (void*)ptr,   0),
+                "Allocating GPU Cr-Plane",
+                __LINE__);        
+                
+                break;                
+        
+        case 8:
+                checkSafe(cudaHostGetDevicePointer((void**)&gpu_Cb,  (void*)ptr,   0),
+                "Allocating GPU Cb-Plane",
+                __LINE__);        
+                
+                break;                
+        
         
         default:
                 break;
@@ -151,13 +226,48 @@ __host__ unsigned char* MapImageToCPU(int ch=1)
 } 
 
 
-__host__ unsigned char* MapSubtractor()
+__host__ unsigned char* MapCalibrator(int ch)
 {
     unsigned char *ptr;
     checkSafe(cudaSetDeviceFlags(cudaDeviceMapHost),"Assigning Device Flags @ Subtractor",__LINE__);
     
-    checkSafe(cudaHostAlloc(&ptr,HEIGHT * WIDTH * sizeof(unsigned char), cudaHostAllocMapped), "Allocating CPU Subtractor",__LINE__);
-    checkSafe(cudaHostGetDevicePointer((void**)&gpusubptr,  (void*)ptr,   0),"Allocating GPU Subtractor",__LINE__);
+    checkSafe(cudaHostAlloc(&ptr,BSIZE * BSIZE * sizeof(unsigned char), cudaHostAllocMapped), "Allocating CPU Subtractor",__LINE__);
+    
+    switch(ch)
+        {
+        case 1:
+               checkSafe(cudaHostGetDevicePointer((void**)&calibrate_R,  (void*)ptr,   0),
+                        "Allocating Calibrator - R Plane",__LINE__);
+               break;
+        case 2:
+               checkSafe(cudaHostGetDevicePointer((void**)&calibrate_G,  (void*)ptr,   0),
+                        "Allocating Calibrator - G Plane",__LINE__);
+               break;
+        
+        case 3:
+               checkSafe(cudaHostGetDevicePointer((void**)&calibrate_B,  (void*)ptr,   0),
+                        "Allocating Calibrator - B Plane",__LINE__);
+               break;         
+        case 4:
+               checkSafe(cudaHostGetDevicePointer((void**)&calibrate_Y,  (void*)ptr,   0),
+                        "Allocating Calibrator - Y Plane",__LINE__);                
+        
+                break;
+        case 5:
+               checkSafe(cudaHostGetDevicePointer((void**)&calibrate_Cr,  (void*)ptr,   0),
+                        "Allocating Calibrator - Cr Plane",__LINE__);
+                break;        
+        case 6:
+               checkSafe(cudaHostGetDevicePointer((void**)&calibrate_Cb,  (void*)ptr,   0),
+                        "Allocating Calibrator - Cb Plane",__LINE__);                
+                        
+                break;  
+           
+              
+        default: break;
+        }
+    
+    
     return ptr;
 }
 
@@ -181,17 +291,17 @@ __host__ unsigned char* MapFilter()
 /*
 GET A POINTER TO CPU_MEMORY TO ASSIGN THRESHOLD RATHER THAN COPYING ANYTHING TO GPU
 ALSO USE A GLOBAL FUNCTION THAT CAN ASSIGN MEMORY IN DEVICE
-
 */
 __host__ int* assign_threshold()
 {
         
       
      //---------CALL A GLOBAL FUNCTION THAT CAN SAFELY ASSIGN GPU MEMORY---------//
-        checkSafe(cudaMalloc(&pdensity,N * sizeof(int)), "Allocating Density Records",__LINE__);
-        checkSafe(cudaMemset(pdensity,0,N * sizeof(int)), "Assigning 0 to Density",__LINE__);
-   
-        checkSafe(cudaMalloc(&small_images,N * sizeof(Blocks)),"Assigning GPU Block Records",__LINE__);
+        checkSafe(cudaMalloc((void**)&pdensity,N * sizeof(int)), "Allocating Density Records",__LINE__);
+        checkSafe(cudaMalloc((void**)&arcs,N * sizeof(int)), "Allocating Density Records",__LINE__);
+           
+        checkSafe(cudaMalloc((void**)&small_images,N * sizeof(Blocks)),"Assigning GPU Block Records",__LINE__);
+        checkSafe(cudaMemset((void**)small_images,0,N * sizeof(Blocks)),"Assigning GPU Block Records",__LINE__);
      //-----------NOW MAP DEVICE MEMORY---------------------------
         
      int* ptr;
@@ -204,7 +314,7 @@ __host__ int* assign_threshold()
      
      */
      
-     checkSafe(cudaHostAlloc( (void**)&ptr, 5 * sizeof(int), cudaHostAllocMapped),"Allocating CPU Threshold",__LINE__);
+     checkSafe(cudaHostAlloc((void**)&ptr, 5 * sizeof(int), cudaHostAllocMapped),"Allocating CPU Threshold",__LINE__);
      checkSafe(cudaHostGetDevicePointer((void**)&gputhresh,(void*)ptr,0), "Assigning GPU Threshold",__LINE__);
     
      checkSafe(cudaHostAlloc( (void**)&cpu_maxval,2 * sizeof(int), cudaHostAllocMapped),"Assigning CPU Max_VAL",__LINE__);
@@ -223,27 +333,133 @@ __host__ int* assign_threshold()
     dim3 numblocks(32,24);
     dim3 numthreads(20,20);
     
-    BGSubtract <<< numblocks,numthreads >>> (gpuptr,gpusubptr);
+    Find_YCrCb <<< numblocks,numthreads >>> (gpu_R,gpu_G,gpu_B,gpu_Y,gpu_Cr,gpu_Cb,1);
     
-    checkSafe(cudaThreadSynchronize(),"Synchronization At Background Removal",__LINE__);
+   
+    checkSafe(cudaDeviceSynchronize(),"Synchronization At Background Removal",__LINE__);
+    
+    BGSubtract <<< numblocks,numthreads >>> (gpu_Y,gpu_Cr,gpu_Cb,gpuptr);
+    
+  
+    checkSafe(cudaDeviceSynchronize(),"Synchronization At Background Removal",__LINE__);
  }
  
  
- __global__ void BGSubtract(unsigned char* img1,unsigned char* img2)
+ void ConvertBox()
+ {
+    dim3 numblocks (4,4);
+    dim3 numthreads (20,20);
+    
+    Find_YCrCb <<< numblocks,numthreads >>> (calibrate_R,calibrate_G,calibrate_B,
+                                             calibrate_Y,calibrate_Cr,calibrate_Cb,
+                                             2);               
+ 
+ 
+ }
+ 
+ __global__ void Find_YCrCb(unsigned char* img_R,unsigned char* img_G,unsigned char* img_B,
+                            unsigned char* img_Y,unsigned char* img_Cr,unsigned char* img_Cb,
+                            int ch)
+{
+
+  int x = ( blockIdx.x * blockDim.x ) + threadIdx.x;
+  int y = ( blockIdx.y * blockDim.y ) + threadIdx.y;
+       
+  int SPACING;
+  
+  switch(ch)
+  {
+    case 1: SPACING = WIDTH ;
+            break;
+           
+    case 2: SPACING = BSIZE ;
+      
+           break;
+           
+    default:
+    
+           break;              
+  
+  
+  }
+  
+ int pos = x + ( y * SPACING ) ;
+
+ float Y  = ( img_R[pos] * 0.299 ) + ( img_G[pos] * 0.587 ) + ( img_B[pos] * 0.114 );
+ float Cr = ( ( img_R[pos] - Y ) * 0.713 ) + DELTA; 
+ float Cb = ( ( img_B[pos] - Y ) * 0.564 ) + DELTA;  
+ 
+ img_Y[pos]  = (unsigned char)Y;
+ img_Cr[pos] = (unsigned char)Cr;
+ img_Cb[pos] = (unsigned char)Cb;
+
+}                            
+ 
+ 
+ __global__ void BGSubtract(unsigned char* Y,unsigned char* Cr,unsigned char* Cb,unsigned char* dest)
  {
         int x = ( blockIdx.x * blockDim.x ) + threadIdx.x;
         int y = ( blockIdx.y * blockDim.y ) + threadIdx.y;
         
         int pos = x + ( y * WIDTH ) ;
         
-        if( pos < isize )
-        {
-                img1[pos]= img1[pos] - img2[pos];
+            
+        dest[pos]= 0 ;    
         
-        }
+            for(int i=0;i<5;i++)
+            {
+                if(checkRange(Cr[pos],f_values[2*i],5) && 
+                   checkRange(Cb[pos],f_values[(2*i)+1],5))
+                   {
+                    dest[pos]=255;
+                   }
+                                  
+            
+            }
+             
+               
  
  
  }
+ 
+__global__ void PrintK(int* density)
+{
+   /* for(int i=0;i<5;i++)
+    {
+        printf("Cr : %f Cb : %f\n",f_ratios[2*i],f_ratios[(2*i)+1]);
+    
+    
+    }
+    if(density != NULL)
+    {
+      for(int i=0;i<N;i++)
+        {
+            printf("Density : %d \t",density[i]);
+    
+    
+        }
+    }
+
+*/
+}
+
+void PThreshold()
+{
+ 
+ PrintK <<<1,1>>> (NULL);
+
+}
+
+__device__ float GetPart(float value,int places)
+{
+   int num = (int)value;
+   
+   float rem = value - num;
+   
+   return (rem + float(places));
+}
+
+ 
  
 __global__ void splitblocks(unsigned char* ptr,Blocks* simage) 
 {                                                           
@@ -258,11 +474,11 @@ __global__ void splitblocks(unsigned char* ptr,Blocks* simage)
   int global_x = ( blockIdx.x * blockDim.x) + threadIdx.x;
   int global_y = ( blockIdx.y * blockDim.y) + threadIdx.y;
   
-  int pixel_loc = global_x + ( global_y * WIDTH);
+  int pixel_loc = global_x + ( global_y * WIDTH );
   
-  int blockID = pixel_loc / ( BSIZE * BSIZE );
-  
-  int local_x = global_x % BSIZE ;
+  int blockID = ( global_x / BSIZE ) + ( 8 * ( global_y  /  BSIZE ) ); // 8 is the number of BLOCKS Per ROW
+                                                            
+  int local_x = global_x % BSIZE ;                          
   int local_y = global_y % BSIZE ;
   
   int pos = local_x + ( local_y * BSIZE );
@@ -284,9 +500,20 @@ __global__ void splitblocks(unsigned char* ptr,Blocks* simage)
   
    if(pixel_loc<isize)
      {
-            simage[blockID].data[pos]=ptr[pixel_loc];
+       simage[blockID].data[pos]=ptr[pixel_loc];
      } 
-      
+     
+    
+}
+
+__host__ int* MapValues()
+{
+
+
+
+
+
+   return NULL;
 }
 
 
@@ -294,37 +521,18 @@ __global__ void write_density(int* pd, Blocks* simage)
 
     {
         //Blocks* simage) GOES IN FUNCTION LINE
-        int i,j,x=blockIdx.x;
-        pd[x]=0;
-        for(i=0;i<N;i++)
+        int i,x=threadIdx.x;
+        
+        pd[x]=0;      
+           
+        for(i=0;i<(BSIZE*BSIZE); i++)
         {
-            for(j=0;j<N;j++)
-            {
-               if(simage[x].data[( i * BSIZE) + j] == 255 )
+             if(simage[x].data[i] == 255 )
                {
-                 pd[x]++; //This addition is threadsafe
+                   pd[x]++;
                }
-            
-            }
-        
-        }
-        
-        
-        
-  /*       
-  int bID=blockIdx.x;
-  int x=threadIdx.x;
-  int y=threadIdx.y;
-  
-  int pixel_loc = (bID * BSIZE) + (y * WIDTH) + x ; 
-  int blockID   = x + (y * BSIZE); 
-  
-               if(simage[pixel_loc] == 0 )
-               {
-                 atomicAdd(&pd[blockID],1); //This addition is threadsafe
-               }
-  
-  */        
+       }
+   
 }
     
  
@@ -332,11 +540,11 @@ __global__ void write_density(int* pd, Blocks* simage)
 __host__ int finger_location()
 {
 /*Assuming I've Already Have Assigned CPU Image Mapped Pointer */
-
-        /*Searching Function*/
+       
        dim3 sblocks(32,24);
              
-       dim3 sthreads(20,20); // NxN array
+       dim3 sthreads(20,20); // NxN array ; Max 512 threads per block 
+                             // for GPU's with Compute 2.0 and lower                   
         
         /* 
            SPLIT CURRENT IMAGE FROM IPCAM TO MULTIPLE IMAGES 
@@ -345,96 +553,109 @@ __host__ int finger_location()
         */
         
         splitblocks <<< sblocks ,sthreads >>> (gpuptr,small_images);
-        //checkSafe(cudaThreadSynchronize(),"Synchronization @ Finding Fingers",__LINE__);
+        
+        
+        //checkSafe(cudaDeviceSynchronize(),"Synchronization @ Finding Fingers",__LINE__);
+           
+       
                     
-        write_density <<< N,1 >>> (pdensity, small_images);
-        //checkSafe(cudaThreadSynchronize(),"Synchronization @ Finding Fingers",__LINE__);    
-                 
+        write_density <<< 1,N >>> (pdensity, small_images);
+      
+        //checkSafe(cudaDeviceSynchronize(),"Synchronization @ Finding Fingers",__LINE__);
+        
+        find_arcs <<<1,N>>> (arcs,small_images,gpufilter);
                       
         /* Simple CALLING Function after Doing Everything */    
          
-        find_maxvalue <<<1,1>>> (pdensity,gputhresh,gpu_maxval,small_images,gpufilter); 
+        find_maxvalue <<< 1,1 >>> (arcs,gpu_maxval,gputhresh); 
+        
         
         /*Synchronize All working threads*/
-        
-        checkSafe(cudaThreadSynchronize(),"Synchronization @ Finding Fingers",__LINE__);
-        
-            
+        checkSafe(cudaDeviceSynchronize(),"Synchronization @ Finding Fingers",__LINE__);            
         return cpu_maxval[0];
 
 }
 
-void CleanImage()
-{
-cudaFreeHost(gpuptr);
-}
 /*Block Thread Process 
 Unfinished Cursor Finding Process
 */
 
 __device__ bool checkRange(int value,int threshold,int deviation)
 {
-return ( ( value > ( threshold - deviation) ) && (value < ( threshold + deviation) ) );
+    return ( ( value > ( threshold - deviation) ) && (value < ( threshold + deviation) ) );
+}
 
+__device__ bool checkRange(int v,int t,int udev,int ldev)
+{
+    return ( ( v > ( t - ldev) ) && (v < ( t + udev) ) );
 }
 
 
-__global__ void find_maxvalue(int* array,int* records,int* value,Blocks* image,unsigned char* filter)
+__device__ bool checkRange(unsigned char value,unsigned char threshold,unsigned char deviation)
 {
-    int i,j,BLOCK=-1;
+
+    return ( ( value > ( threshold - deviation) ) && (value < ( threshold + deviation) ) );
+}
+
+__device__ bool checkRange(float value,float threshold,float upper_limit,float lower_limit)
+{
+    return ( ( value > ( threshold - lower_limit) ) && (value < ( threshold + upper_limit) ) );
+}
+
+
+
+__global__ void find_arcs(int* array,Blocks* image,unsigned char* filter)
+{
+   int i,c_match=0,x=threadIdx.x;
+        
+   
+    for(i=0;i<(BSIZE*BSIZE);i++)
+    {
+           if( (image[x].data[i] & filter[i]) == 255 )  
+           {
+                c_match++;
+           }
+    }
     
+   
+   array[x]=c_match;
+    
+    
+    
+}
+
+__global__ void find_maxvalue(int* array,int* value,int* records)
+{
+   int i,BLOCK = -1;
+   bool density_match = false;
+       
     for(i=0;i<N;i++)
     {
-            for(j=0;j<5;j++)
-            {
-                if( checkRange(array[i],records[j],100) == 1 )
-                {  
-                BLOCK = i;  
-                }
-                         
-            }
     
+    printf(" %d " , array[i]);
+    
+    density_match = checkRange(array[i],records[0],10,100) ||
+                    checkRange(array[i],records[1],10,100) ||
+                    checkRange(array[i],records[2],10,100) ||
+                    checkRange(array[i],records[3],10,100) ||
+                    checkRange(array[i],records[4],10,100);
+    
+       if ( checkRange(array[i],450,70) || density_match )
+       {
+           BLOCK= i;
+           break;
+       }                                     
     }
-        
-        
-    value[0]=BLOCK;
+    printf("||||| \n ");
 
-
+ value[0]=BLOCK;
 }
-
-
-
-
-__device__ int checkarc(Blocks* image,int value,unsigned char* filter)
+__global__ void Make_Histogram()
 {
-        int temp=0,i,j,pos;
-       
-       /*   BITWISE AND WITH THE VALUE 
-            OF THE BLOCK WITH THE FILTER
-            CROSS MATCH WITH REFERENCE VALUE 
-            LATER......
-       */     
-        for(i=0;i<BSIZE;i++)
-          {
-            for(j=0;j<BSIZE;j++)
-            {
-            
-                    pos= i + (j * BSIZE);
-                    
-                    if( (image[value].data[pos] && filter[pos] ) == 255 )
-                    {
-                            temp=temp + 1;
-                    
-                    }
-                    
-            }
-          
-          }
-        
-     return temp;   
+
 }
 
-/*Dummy Main Function
-  Just To Be On The Safe Side
- */
 
+
+
+                     

@@ -280,11 +280,12 @@ void Finger_Track(cv::Mat &img)
               
               try
               { 
-                if(draw_wait==false)
-                {
-                               
+                while(draw_wait==true)
+                {}
+                      
+                   draw_wait=true;           
                    prev_block=Find_BlockCPU(img);
-                 
+                   draw_wait=false;
                   
                              
                    
@@ -294,7 +295,13 @@ void Finger_Track(cv::Mat &img)
                      AFTER 500ms we AGAIN CHECK IF ITS SAFE 
                      TO ACCESS GPU MEMORY
                    */  
+                   
+                   while(draw_wait==true)
+                    {}
+                    
+                   draw_wait=true;
                    new_block=Find_BlockCPU(img);
+                   draw_wait=false;
                    
                    std::cout<<"Location : "<<new_block<<"\n";
                    
@@ -326,7 +333,7 @@ void Finger_Track(cv::Mat &img)
                        
                        
                      }
-                     else if ( (drag==false) && ( drag_block=new_block ) ) 
+                     else if ( (drag==true) && ( drag_block == new_block ) ) 
                      {
                        while( draw_wait == true )
                        {}
@@ -346,10 +353,12 @@ void Finger_Track(cv::Mat &img)
                      }        
                 
                    }
-                 }
                  
                  
-             }     
+           }
+                 
+                 
+                 
         
         catch(...)
         {

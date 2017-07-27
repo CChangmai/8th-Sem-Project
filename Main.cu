@@ -4,11 +4,11 @@
 #endif
 
     /* To Stop Multiple Instances of Header Files Being Called */
-    #define HAS_OPENCV
+    #define HAS_OPENCV 
     #include<opencv2/core/core.hpp>
     #include<opencv2/highgui/highgui.hpp>
     #include<opencv2/imgproc/imgproc.hpp>
-    
+    #include "opencv2/videoio.hpp"
 
 
     #include<chrono>
@@ -47,7 +47,8 @@
 
 #define FPS 30
 
-typedef std::chrono::high_resolution_clock Timer;
+typedef std::chrono::steady_clock Timer;
+typedef std::chrono::steady_clock::time_point TIME;
 bool drag=false; //For Indicating Drag And Drop
 
 bool gpulock=false;      //mutex like variable, used when GPU Functions are needed
@@ -57,19 +58,15 @@ bool close_threads=false;
 
 For Storing Count Threads (Global Variable)
 
-std::future<int> count;
-std::promise<int> p_count;
-
-
-std::future<int> oldb;
-std::future<int> newb;
-std::promise<int> p_old;
-std::promise<int> p_new;
-std::mutex m;
 */
 void Finger_Track();
 void Draw_Everything(cv::Mat&);
 
+const cv::Rect sector((WIDTH-BSIZE)/2,(HEIGHT-BSIZE)/2,BSIZE,BSIZE);
+
+cv::Mat element2 = getStructuringElement(cv::MORPH_RECT,
+                                         cv::Size( 3, 3 ),
+                                         cv::Point( 1 , 1 ) );
 /*Assigning A New Window To Be Globally Accessed To All Threads*/
 
 
@@ -82,12 +79,17 @@ int main(int argc, char* argv[])
        
        /* ASSIGN THRESHOLD MEMORY MAP TO GPU BEFOREHAND*/
         int *pcount=assign_threshold();
-       //int* pcount[5];
+       
                     
+      
        
        std::vector<std::string> message;
+       message.push_back(""); //Initialise With Empty String
+       message.push_back("Please try to Maintain");
+       message.push_back("A Plain And Static Background"); 
+      
+   
        
-                         message.push_back(""); //Initialise With Empty String
        
        /*
         Get Puzzle From Hard Drive
@@ -96,15 +98,18 @@ int main(int argc, char* argv[])
         THE IMAGE DURING ITS CALL
         
        */ 
-       if(Assign_Puzzle(argv[1],BSIZE,BSIZE,640,480,cv::Scalar(0,0,255))==false)
+       if(Assign_Puzzle(argv[1],BSIZE,BSIZE,640,480,cv::Scalar(0,0,255)) == false)
        {
           return 0;
        }
 
        try
        {
+       
        Puzzle_Rearrange();
        IPCAM::startRx(); 
+       
+       
        
        /*
          Make 2 Clones One For Text Overlay And One for Processing
@@ -113,11 +118,20 @@ int main(int argc, char* argv[])
          THEN ALLOCATE BINARY IMAGE FROM GPU CLONES
        */
        
-        cv::Mat OvImg;
+       cv::Mat OvImg;
         
-        IPCAM::getRx(OvImg);
+       IPCAM::getRx(OvImg);
+      /*  
+       cv::VideoWriter cpu,gpu;
+       
+       int codec = CV_FOURCC('M','J','P','G');
+       int codec2 = CV_FOURCC('M','P','4','2');
+       
+       cpu.open("cpu.avi",codec,FPS,OvImg.size(),CV_8UC3);
+       gpu.open("gpu.avi",codec2,FPS,OvImg.size(),CV_8UC1);
         
-        cv::Mat ProcImg_Color,ProcImg_Gray;
+        cv::Mat ProcImg_Color,ProcImg_Gray,ProcImg_BW;
+       */ 
         /*
         Allocate Memory via GPU and set gpulock to true during this process
         gfilter VARIABLE NAME IS USED
@@ -126,17 +140,33 @@ int main(int argc, char* argv[])
         */
                 gpulock=true;
                 
-                cv::Mat gpuImg(OvImg.size(),CV_8UC1,(void*)MapImageToCPU(1));
-                cv::Mat gpuImg2(OvImg.size(),CV_8UC1,(void*)MapImageToCPU(2));
+                cv::Mat gpuImg(  OvImg.size(), CV_8UC1, (void*)MapImageToCPU(1)),
+                        gpuImg2( OvImg.size(), CV_8UC1, (void*)MapImageToCPU(2)),
+                        R_Plane( OvImg.size(), CV_8UC1, (void*)MapImageToCPU(3)),
+                        G_Plane( OvImg.size(), CV_8UC1, (void*)MapImageToCPU(4)),
+                        B_Plane( OvImg.size(), CV_8UC1, (void*)MapImageToCPU(5)),
+                        Y_Plane( OvImg.size(), CV_8UC1, (void*)MapImageToCPU(6)),
+                        Cr_Plane(OvImg.size(), CV_8UC1, (void*)MapImageToCPU(7)),
+                        Cb_Plane(OvImg.size(), CV_8UC1, (void*)MapImageToCPU(8));
+                        
+               std::vector<cv::Mat> Channels {B_Plane,G_Plane,R_Plane};
                 
-                cv::Mat gfilter(BSIZE,BSIZE,CV_8UC1,MapFilter());
+               
+               cv::Mat Box_R(BSIZE,BSIZE, CV_8UC1, (void*)MapCalibrator(1)),
+                       Box_G(BSIZE,BSIZE, CV_8UC1, (void*)MapCalibrator(2)),
+                       Box_B(BSIZE,BSIZE, CV_8UC1, (void*)MapCalibrator(3)),
+                       Box_Y(BSIZE,BSIZE, CV_8UC1, (void*)MapCalibrator(4)),
+                       Box_Cr(BSIZE,BSIZE,CV_8UC1, (void*)MapCalibrator(5)),
+                       Box_Cb(BSIZE,BSIZE,CV_8UC1, (void*)MapCalibrator(6));
+
+               std::vector<cv::Mat> Box_RGB {Box_B,Box_G,Box_R};
+                    
+                //ALLOCATE AND CREATE GPU IMAGE IN MEMORY    
+               
+                cv::Mat gfilter(BSIZE,BSIZE,CV_8UC1,(void*)MapFilter());
                 make_Filter(gfilter);
-                
-                std::cout<<"Filter in GPU : "<<gfilter<<"\n";
-                
-               // gpuImg.setTo(0);
-               // gpuImg2.setTo(0);
-                
+                             
+                           
                 gpulock=false;
          
                                 
@@ -147,6 +177,7 @@ int main(int argc, char* argv[])
           Access It For Drawing  
           
         */
+        
         cv::Mat prevRect(BSIZE,BSIZE,CV_8U);       
         //prevRect.setTo(cv::Scalar(0));
         
@@ -154,6 +185,10 @@ int main(int argc, char* argv[])
         
         cv::namedWindow( "Puzzle" );
         cv::namedWindow( "GPU Image" );
+        cv::namedWindow( "GPU Filter");
+        
+        cv::imshow("GPU Filter",gfilter);
+        
         /* 
            GET THE FINGERS CALIBRATED FROM THE DATA FOR FIVE FINGERS 
            PLUS MAKE THE REQUIRED FILTERS BEFORE INITIALISATION
@@ -162,53 +197,44 @@ int main(int argc, char* argv[])
            
         */
         make_Filter();
-        
+       
+               
+        float* CrCb_ratios = new float[10];
+        unsigned char* CrCb_Values = new unsigned char[10];
           
         prevRect.setTo(0);
         
-        for(int i=0;i<5;i++)
+        for(int i=0,j=0,k=1;i<5;i++,j=2*i,k=(2*i)+1)
         {
                  
                  calibrated=false;
                  std::ostringstream temp;
                  temp<<"Enter Finger Number : "<<i+1;
                  message[0]=temp.str();
-                
-              
+                 
+                 IPCAM::RefreshRx(5);
                                   
                  while(calibrated==false)
                  {
                  
                  IPCAM::getRx(OvImg);
-                 Write_Text(message,OvImg);
+                 
+                 split(OvImg(sector),Box_RGB);
+                 
+                 ConvertBox();
                  /*
                     Keep On Grabbing Images Till The Image is Non-Noisy and good
                     Calibrate Variable Keeps Track of success or failure
                  */
                     
-                   /*
-                   THIS IS THE CULPRIT THAT RUINED MY LIFE
-                   ASSERTION FAILED ERRORS SHOW HERE
-                   */
-                    int j = Calibrate_Finger(OvImg,
-                                            prevRect,
-                                            OvImg.rows,
-                                            OvImg.cols,
-                                            BSIZE,
-                                            BSIZE);
+               
+                     
+                     bool t = calibrate_YCrCb(Box_Y,Box_Cr,Box_Cb);
+                     
                     
-                                          
-                    if(j>0)
-                    {
-                        pcount[i]=j;
-                        calibrated=true;
-                                               
-                        Draw_Box(OvImg,cv::Scalar(0,255,0),640,480);
-                        
-                        cv::imshow("Puzzle", OvImg);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
-                        IPCAM::RefreshRx(5.0);
-                        cv::waitKey(1);       
+                     
+                     
+                             
                         
                         /* WHEN WE FIND A MATCH WE DO TWO THINGS
                            FLUSH OUT THE PREVIOUSLY MATCHED 
@@ -223,26 +249,48 @@ int main(int argc, char* argv[])
                            WE MAKE THE MAIN FUNCTION SLEEP FOR TWO SECONDS FOR 
                            THE PERSON TO CHANGE HIS FINGERS
                         */   
-                           
-                        prevRect.setTo(0);
+                    
                         
-                        /*
-                        SKIP FRAMES FOR 2 SECONDS
-                        FUNCTION ACCEPTS FLOATING POINT 
-                        VALUES
-                        */
+                   if (t == true)
+                    {
+                        TIME start= Timer::now();
                         
+                        pcount[i] = max_YCrCb[2];
+                        
+                        
+                        CrCb_Values[j] = new_Cr;
+                        CrCb_Values[k] = new_Cb;
+                        
+                        CrCb_ratios[j] = Cr_ratio;
+                        CrCb_ratios[k] = Cb_ratio;
+                    
+                        Draw_Box(OvImg,cv::Scalar(0,255,0),640,480);
+                        
+                        cv::imshow("Puzzle", OvImg);
+                        
+                                             
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                       
+                       
+                        TIME stop = Timer::now();
+                        
+                        
+                        
+                        //IPCAM::RefreshRx(std::chrono::duration_cast<std::chrono::seconds>(stop - start).count());
+                        
+                        calibrated = true;
+                         
                         
                     }
+                    
                     else
                     {
                          
                          
-                         IPCAM::getRx(OvImg);
-                         
                          Write_Text(message,OvImg);
                          Draw_Box(OvImg,cv::Scalar(0,0,255),640,480);
                          cv::imshow("Puzzle",OvImg);          
+                         //cpu.write(OvImg);
                          cv::waitKey(1);      
                     }
                    
@@ -250,19 +298,8 @@ int main(int argc, char* argv[])
                  }               
         }
         
-        
-        
-        
-        /*
-          Initialising The Future Variables before being called
-          In The While Loop. This should prevent further race 
-          conditions.
-        
-        newb=p_new.get_future();  
-        oldb=p_old.get_future();  
-        */ 
-        
-        IPCAM::getRx(OvImg);
+        TransferValues(CrCb_Values,pcount,CrCb_ratios);
+       
         /* 
             WE RECIEVE A FRAME FROM THE IPCAM FIRST TO DESTROY CALIBRATION FRAMES        
             Create A Thread For Drawing the image after the 30 fps limit has been reached 
@@ -271,7 +308,21 @@ int main(int argc, char* argv[])
         */
         
         //std::thread Draw(Draw_Everything,std::ref(ProcImg_Color));
+        /*THIS PART WAS MAKING ERROR BECAUSE THERE ARE NO YCRCB VALUES
+          MADE BEFORE DETACHING THREAD
+          SO ERRONOUS RESULTS OCCUR
+        */  
+        
+        IPCAM::getRx(OvImg);
+        split(OvImg,Channels);
+        
+        Y_Plane.setTo(0);
+        Cr_Plane.setTo(0);
+        Cb_Plane.setTo(0);
+        
         std::thread Locate(Finger_Track);
+        
+                                
         
         
         //Draw.detach();
@@ -297,11 +348,11 @@ int main(int argc, char* argv[])
           
           IPCAM::getRx(OvImg);
           
-          ProcImg_Color=OvImg.clone();
-          
+          split(OvImg,Channels);
+         
           draw_wait=false;
           /*
-          Create two Images
+          Creatxe two Images
           ProcImg - Image Copy For Processing The Algorithm
           OvImg - For Drawing Overlay To the User
           
@@ -313,11 +364,19 @@ int main(int argc, char* argv[])
           */
           
           
-          if (gpulock==false)
+          if(gpulock==false)
           {
               gpulock=true;
               
-              cv::cvtColor(ProcImg_Color,ProcImg_Gray,cv::COLOR_RGB2GRAY);
+              
+              /*
+              equalizeHist(R_Plane,R_Plane);
+              equalizeHist(G_Plane,G_Plane);
+              equalizeHist(B_Plane,B_Plane);
+              
+              merge(Channels,ProcImg_Color);
+              
+              //cv::cvtColor(ProcImg_Color,ProcImg_Gray,cv::COLOR_RGB2GRAY);
               
               //Set THRESHOLDED Image To GPUIMG
               /*cv::adaptiveThreshold(ProcImg_Gray,gpuImg,1,
@@ -325,37 +384,50 @@ int main(int argc, char* argv[])
                                     CV_THRESH_BINARY,
                                     5,
                                     0);
+              
               */
-              cv::threshold(ProcImg_Gray,gpuImg,0, 255, CV_THRESH_BINARY_INV + CV_THRESH_OTSU); 
+              //cv::threshold(Y_Plane,gpuImg,0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU); 
+                       
+            //  ProcImg_BW.copyTo(gpuImg);         
                                  
               RemoveBackground();
               
-              gpuImg.copyTo(gpuImg2);
+              //morphologyEx(gpuImg,gpuImg,cv::MORPH_CLOSE,element2);
+             
+              //ProcImg_BW.copyTo(gpuImg2);
               
               cv::imshow("GPU Image",gpuImg);  
-                         
+              //gpu.write(gpuImg);           
                
              // std::cout<<"\n I am here \n";
               gpulock=false;
+          
           }
-         
           
          
           
           /* First Watch For Any Finger Movement*/
-          if (draw_wait==false)
+          if(draw_wait == false)
           {
            draw_wait=true;
            Blend_Puzzle(OvImg,0.60);
            imshow("Puzzle",OvImg);
+           //cpu.write(OvImg);
            cv::waitKey(1);
            
            draw_wait=false; 
-           
-          }           
+          } 
+          
+          
+                     
        
-        }while( IPCAM::status== 1 );// && (isPuzzleComplete()==false) );
+        }while ( (IPCAM::status == 1 ) && (isPuzzleComplete() == false) );
 
+  free(CrCb_Values);
+  free(CrCb_ratios);
+  free(max_YCrCb);
+  free(histogram);
+  
   }
   catch(...)
   {
@@ -425,9 +497,6 @@ void Finger_Track()
                    */  
                    gpulock=true;
                    
-                   std::cout<<"Block Location : " <<new_block<<std::endl;
-                   
-                   
                    /* 
                       IF FINGER IS AT DEFAULT VALUE I.E -1
                       THEN ONLY FIND FINGER LOCATION
@@ -435,15 +504,13 @@ void Finger_Track()
                       LOCATION IS STORED FROM A PREVIOUS VALUE
                    */   
                    prev_block=finger_location();
-                             
+                   
+                   std::cout<<"\n Block Location : " <<prev_block<<std::endl;          
                                     
                    gpulock=false;            
               
                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                   /*
-                     AFTER 500ms we AGAIN CHECK IF ITS SAFE 
-                     TO ACCESS GPU MEMORY
-                   */  
+                  
                    while(gpulock==true)
                    { }
                    /* LOCK THE GPU AFTER A WAITING TIME */
@@ -479,8 +546,7 @@ void Finger_Track()
                        draw_wait=true;
                        Swap_Pieces(drag_block,new_block,BSIZE);
                        draw_wait=false;
-                       
-                       
+                                     
                        
                      }
                      else if ( (drag==false) && ( drag_block=new_block ) ) 

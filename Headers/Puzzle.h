@@ -79,17 +79,17 @@ bool Assign_Puzzle(char* s,int bwidth,int bheight,int swidth,int sheight,cv::Sca
     
       int i,j,count=0;
       
-      cv::resize(image,image,cv::Size(swidth,sheight));
+      cv::resize(image,image,cv::Size(WIDTH,HEIGHT));
       
       /*Copy Image To Puzzle After Resizing And Drawing Retangles*/
       
-            for(i=0;i<sheight;i+=bheight)
+            for(i=0;i<HEIGHT;i+=bheight)
             {
             
                 
                            
                     
-                    for(j=0;j<swidth;j+=bwidth)
+                    for(j=0;j<WIDTH;j+=bwidth)
                     {
                     
                                                                      
@@ -337,7 +337,7 @@ void Draw_Single(int index,cv::Scalar Color)
 int x=(int)( ( index % BLOCKS_PER_ROW ) * BSIZE );
 int y=(int)( ( index / BLOCKS_PER_ROW ) * BSIZE );
 
-cv::Rect paint_block(x,y,BSIZE,BSIZE);
+cv::Rect paint_block(x,y,BSIZE-1,BSIZE-1);
 
                  cv::rectangle(Puzzle,
                                paint_block,

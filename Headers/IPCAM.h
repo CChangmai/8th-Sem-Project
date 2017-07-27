@@ -71,7 +71,7 @@ namespace IPCAM
     
        /* WE SET THE PROPERTY OF THE VIDEOCAPTURE TO GET THE NEXT FEED */
        int current_frame = (int)IP_Feed.get(CV_CAP_PROP_POS_FRAMES);
-       int frameskip = (int)(time*FPS);
+       int frameskip = (int)(2*time*FPS);
        IP_Feed.set(CV_CAP_PROP_POS_FRAMES,current_frame+frameskip-1);
       
     }
